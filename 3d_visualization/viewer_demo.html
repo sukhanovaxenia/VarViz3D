@@ -17,6 +17,44 @@
 
   <div id="viewport" style="width: 600px; height: 400px; border: 1px solid #ccc;"></div>
 
+  <div style="margin-top:8px;">
+    <button onclick="setStyle('cartoon')">Cartoon </button>
+
+    <button onclick="setStyle('thread')">Thin thread</button>
+    <button onclick="toggleSpin()">Spin</button>
+
+  </div>
+
+  <div id="legend" style="margin-top:10px; font-family:sans-serif; font-size:14px;">
+    <strong>Legend:</strong>
+    <span style="display:inline-block; width:12px; height:12px; background-color:magenta; margin-right:4px;"></span> α-helix
+    <span style="display:inline-block; width:12px; height:12px; background-color:gold; margin-left:10px; margin-right:4px;"></span> β-sheet
+    <span style="display:inline-block; width:12px; height:12px; background-color:lightgray; margin-left:10px; margin-right:4px; border:1px solid #ccc;"></span> Coil/loop
+  </div>
+
+  <div style="margin:8px 0;">
+    <label>Heatmap:
+      <select id="trackSel">
+        <option value="any">All variants (density)</option>
+        <option value="path">Pathogenic variants</option>
+        <option value="pop">Population variability</option>
+      </select>
+    </label>
+    <label style="margin-left:12px;">Window:
+      <input id="winSize" type="number" min="1" max="201" step="2" value="15" style="width:60px;">
+    </label>
+    <!-- inline fallback so it always triggers even if JS wiring fails -->
+    <button id="applyTrack" onclick="applyHeatmap()">Apply heatmap</button>
+  </div>
+
+  <div style="margin-top:8px; width:600px; font-family:sans-serif;">
+    <div style="height:12px; background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000); border:1px solid #ccc;"></div>
+    <div style="display:flex; justify-content:space-between; font-size:12px;">
+      <span>Low</span><span>Medium</span><span>High</span>
+    </div>
+  </div>
+
+  <!-- Put the script LAST so elements exist -->
   <script>
     const stage = new NGL.Stage("viewport", { backgroundColor: "white" });
     window.addEventListener("resize", () => stage.handleResize(), false);
@@ -30,160 +68,152 @@
     let currentStyle = "cartoon";
     let currentId = null;
     let currentSchemeId = null;
+    let lastTracks = null;
 
-    function clearReps(comp) { comp.removeAllRepresentations(); }
-
-    function addCartoonBase(comp) {
+    function clearReps(comp){ comp.removeAllRepresentations(); }
+    function addCartoonBase(comp){
       comp.addRepresentation("cartoon", { aspectRatio: 5, arrowSize: 1.2, scale: 0.7, color: "white" });
       comp.addRepresentation("backbone", { opacity: 0.25 });
     }
-    function addRibbonBase(comp) {
+    function addRibbonBase(comp){
       comp.addRepresentation("ribbon", { scale: 0.8, color: "white" });
       comp.addRepresentation("backbone", { opacity: 0.25 });
     }
-    function addThreadOnly(comp) {
+    function addThreadOnly(comp){
       comp.addRepresentation("backbone", { opacity: 0.9, color: "white" });
     }
 
-    // --- fetch variant frequencies from Flask API ---
-    async function fetchVariantFrequencies(uid) {
-      const r = await fetch(`${API_BASE}/api/variants/${uid}`);
-      if (!r.ok) throw new Error(`Variant API ${r.status}`);
+    async function fetchTracks(uid, win){
+      const url = `${API_BASE}/api/tracks/${uid}?win=${win}`;
+      console.log("GET", url);
+      const r = await fetch(url);
+      if (!r.ok) throw new Error(`tracks API ${r.status}`);
       const j = await r.json();
-      return j.frequencies || [];   // [{pos, freq}, ...]
+      console.log("tracks payload:", j);
+      lastTracks = j;
+      return j;
     }
 
-    // --- blue → white → red colormap, expects values in 0..1 ---
-    function makeBWRColorScheme(values01) {
-      const schemeId = NGL.ColormakerRegistry.addScheme(function () {
-        this.atomColor = function (atom) {
-          const v = values01[atom.resno] ?? 0.0; // 0..1
-          if (v <= 0.5) {                       // blue -> white
+    function pickTrackArray(which, useSmooth = true){
+      const src = useSmooth ? lastTracks?.smooth : lastTracks?.raw;
+      if (!src) return null;
+      return Array.isArray(src[which]) ? src[which]
+           : Array.isArray(src.any)    ? src.any
+           : null;
+    }
+
+    function makeBWRColorScheme(values01){
+      const Registry = NGL.ColormakerRegistry || NGL.ColorMakerRegistry;
+      const id = Registry.addScheme(function(){
+        this.atomColor = function(atom){
+          const v = values01[atom.resno] ?? 0.0;
+          if (v <= 0.5){
             const t = v / 0.5;
             const r = Math.round(255 * t);
             const g = Math.round(255 * t);
             const b = 255;
-            return (r << 16) | (g << 8) | b;
-          } else {                               // white -> red
+            return (r<<16)|(g<<8)|b;
+          } else {
             const t = (v - 0.5) / 0.5;
             const r = 255;
-            const g = Math.round(255 * (1 - t));
-            const b = Math.round(255 * (1 - t));
-            return (r << 16) | (g << 8) | b;
+            const g = Math.round(255*(1-t));
+            const b = Math.round(255*(1-t));
+            return (r<<16)|(g<<8)|b;
           }
         };
       });
-      return schemeId;
+      return id;
     }
 
-    // normalize raw {pos,freq} to array[1..L] in 0..1
-    function normalizeTo01(freqs, length) {
-      const arr = new Array(length + 1).fill(0.0); // 1-based
-      if (!freqs.length) return arr;
-      let min = Infinity, max = -Infinity;
-      for (const f of freqs) {
-        if (typeof f.freq === "number") {
-          if (f.freq < min) min = f.freq;
-          if (f.freq > max) max = f.freq;
-        }
+    async function applyTrackColor(which){
+      if(!currentComp || !currentId){ console.warn("nothing loaded yet"); return; }
+      const win = parseInt(document.getElementById("winSize").value || "15", 10);
+      const useSmooth = true;
+
+      if (!lastTracks || lastTracks.uniprot !== currentId || lastTracks.window !== win) {
+        await fetchTracks(currentId, win);
       }
-      const denom = (max - min) || 1.0;
-      for (const f of freqs) {
-        const pos = f.pos | 0;
-        if (pos > 0 && pos < arr.length) {
-          arr[pos] = (f.freq - min) / denom;
-        }
-      }
-      return arr;
-    }
+      let arr = pickTrackArray(which, useSmooth);
+      if (!arr || !arr.length){ console.warn("No array to paint"); return; }
 
-    async function applyVariantGradient(uniprotId) {
-      const data = await fetchVariantFrequencies(uniprotId);
-      const L = data.length ? Math.max(...data.map(x => x.pos || 0)) : 0;
-      const values01 = normalizeTo01(data, L);
+      console.log(`Painting '${which}' win=${win} values[1..12]=`, arr.slice(1,13));
 
-      // swap scheme
-      try { if (currentSchemeId) NGL.ColormakerRegistry.removeScheme(currentSchemeId); } catch {}
-      currentSchemeId = makeBWRColorScheme(values01);
+      const Registry = NGL.ColormakerRegistry || NGL.ColorMakerRegistry;
+      try { if (currentSchemeId && Registry.removeScheme) Registry.removeScheme(currentSchemeId); } catch {}
+      currentSchemeId = makeBWRColorScheme(arr);
 
-      // re-add base rep but with gradient color
       clearReps(currentComp);
-      if (currentStyle === "cartoon") {
+      if (currentStyle === "cartoon"){
         currentComp.addRepresentation("cartoon", { aspectRatio: 5, arrowSize: 1.2, scale: 0.7, color: currentSchemeId });
         currentComp.addRepresentation("backbone", { opacity: 0.25 });
-      } else if (currentStyle === "ribbon") {
+      } else if (currentStyle === "ribbon"){
         currentComp.addRepresentation("ribbon", { scale: 0.8, color: currentSchemeId });
         currentComp.addRepresentation("backbone", { opacity: 0.25 });
       } else {
         currentComp.addRepresentation("backbone", { color: currentSchemeId, opacity: 0.9 });
       }
+      if (stage.viewer && typeof stage.viewer.requestRender === "function") {
+        stage.viewer.requestRender();
+      }
     }
 
-    // --- main loader ---
-    async function loadAndShow(uniprotId, style = "cartoon") {
-      if (!uniprotId) return alert("Enter a UniProt ID");
+    async function loadAndShow(uniprotId, style="cartoon"){
+      if(!uniprotId) return alert("Enter a UniProt ID");
       currentStyle = style;
       currentId = uniprotId;
+      lastTracks = null;
 
       const pdbUrl = `https://alphafold.ebi.ac.uk/files/AF-${uniprotId}-F1-model_v4.pdb`;
       stage.removeAllComponents();
-      try {
+      try{
+        console.log("Loading PDB:", pdbUrl);
         const comp = await stage.loadFile(pdbUrl);
         currentComp = comp;
 
-        if (style === "cartoon") addCartoonBase(comp);
-        else if (style === "ribbon") addRibbonBase(comp);
+        if(style === "cartoon") addCartoonBase(comp);
+        else if(style === "ribbon") addRibbonBase(comp);
         else addThreadOnly(comp);
 
-        await applyVariantGradient(uniprotId);
+        document.getElementById("trackSel").value = "any";
+        await applyTrackColor("any");
         comp.autoView();
-      } catch (err) {
+      }catch(err){
         alert("Failed to load structure: " + err);
         console.error(err);
       }
     }
 
-    // UI
-    const idInput = document.getElementById("uniprotID");
-    document.getElementById("loadBtn").onclick = () =>
-      loadAndShow(idInput.value.trim(), currentStyle);
-
-    function setStyle(s) {
+    function setStyle(s){
       currentStyle = s;
-      const id = idInput.value.trim();
-      if (stage.compList.length && id) loadAndShow(id, s);
+      const id = document.getElementById("uniprotID").value.trim();
+      if(stage.compList.length && id){
+        loadAndShow(id, s).then(() => {
+          const which = document.getElementById("trackSel").value || "any";
+          applyTrackColor(which);
+        });
+      }
     }
     function toggleSpin(){ stage.setSpin(!stage.parameters.spin); }
-    function resetView(){ if (stage.compList[0]) stage.compList[0].autoView(); }
+    function resetView(){ if(stage.compList[0]) stage.compList[0].autoView(); }
+
+    // expose for inline handlers
+    window.setStyle = setStyle;
+    window.toggleSpin = toggleSpin;
+    window.resetView = resetView;
+    window.applyHeatmap = function(){
+      const which = document.getElementById("trackSel").value;
+      applyTrackColor(which);
+    };
+
+    // run wiring AFTER DOM is ready
+    function init(){
+      document.getElementById("loadBtn").onclick = () =>
+        loadAndShow(document.getElementById("uniprotID").value.trim(), currentStyle);
+      // also wire change events to auto-apply
+      document.getElementById("trackSel").onchange = () => window.applyHeatmap();
+      document.getElementById("winSize").onchange  = () => window.applyHeatmap();
+    }
+    document.addEventListener("DOMContentLoaded", init);
   </script>
-
-  <div id="legend" style="margin-top:10px; font-family:sans-serif; font-size:14px;">
-    <strong>Legend:</strong>
-    <span style="display:inline-block; width:12px; height:12px; background-color:magenta; margin-right:4px;"></span> α-helix
-    <span style="display:inline-block; width:12px; height:12px; background-color:gold; margin-left:10px; margin-right:4px;"></span> β-sheet
-    <span style="display:inline-block; width:12px; height:12px; background-color:lightgray; margin-left:10px; margin-right:4px; border:1px solid #ccc;"></span> Coil/loop
-  </div>
-
-  <div id="domainsPanel" style="margin-top:12px; padding:8px; border:1px solid #ddd; width:600px;">
-    <strong>Domains (UniProt):</strong>
-    <div id="domainsBox" style="margin-top:6px; font-family:sans-serif; font-size:14px;">
-      <em>Load a structure to see domains…</em>
-    </div>
-  </div>
-
-  <div style="margin-top:8px;">
-    <button onclick="setStyle('cartoon')">Cartoon (spirals + arrows)</button>
-    <button onclick="setStyle('ribbon')">Ribbon</button>
-    <button onclick="setStyle('thread')">Thin thread</button>
-    <button onclick="toggleSpin()">Spin</button>
-    <button onclick="resetView()">Reset view</button>
-  </div>
-
-  <div style="margin-top:8px; width:600px; font-family:sans-serif;">
-    <div style="height:12px; background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000); border:1px solid #ccc;"></div>
-    <div style="display:flex; justify-content:space-between; font-size:12px;">
-      <span>Low</span><span>Medium</span><span>High</span>
-    </div>
-  </div>
 </body>
 </html>

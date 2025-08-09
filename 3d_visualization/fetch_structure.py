@@ -1,32 +1,35 @@
 # 3d_visualization/fetch_structure.py
+import math
 import requests
-from typing import List, Dict, Optional
+from typing import List, Dict
 from flask import Flask, jsonify, request
 from flask_cors import CORS
 
 TIMEOUT = 20
 UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb"
-PDB_BASE = "https://data.rcsb.org/rest/v1/core/uniprot"
 ALPHAFOLD_PDB = "https://alphafold.ebi.ac.uk/files/AF-{uid}-F1-model_v4.pdb"
 
 # ---------- helpers ----------
 def _minmax_norm(arr: List[float]) -> List[float]:
+    """Return 0..1 normalization (arr is 1-based; index 0 kept)."""
     if len(arr) <= 1:
         return arr[:]
     v = arr[1:]  # ignore index 0 (we use 1-based residues)
-    m = max(v) if v else 0.0
-    if m <= 0:
+    vmax = max(v) if v else 0.0
+    if vmax <= 0:
         return [0.0] * len(arr)
-    return [0.0] + [x / m for x in v]
+    return [0.0] + [x / vmax for x in v]
 
 def _moving_avg(arr: List[float], k: int) -> List[float]:
+    """Simple sliding window average, keeps length, works on 1-based arrays."""
     if k <= 1:
         return arr[:]
-    # simple sliding window average
     out = [0.0] * len(arr)
-    s, q = 0.0, []
+    s = 0.0
+    q: List[float] = []
     for i, x in enumerate(arr):
-        s += x; q.append(x)
+        s += x
+        q.append(x)
         if len(q) > k:
             s -= q.pop(0)
         out[i] = s / len(q)
@@ -41,10 +44,11 @@ class StructureFetcher:
     def _get(self, url: str):
         return self.s.get(url, timeout=TIMEOUT)
 
-    # --- DOMAINS (your existing method) ---
+    # --- Domains from UniProt ---
     def get_domain_info(self, uni_id: str) -> List[Dict]:
         url = f"{UNIPROT_BASE}/{uni_id}.json"
-        r = self._get(url); r.raise_for_status()
+        r = self._get(url)
+        r.raise_for_status()
         features = r.json().get("features", [])
 
         ACCEPT = {
@@ -71,7 +75,7 @@ class StructureFetcher:
     def alphafold_pdb_url(self, uni_id: str) -> str:
         return ALPHAFOLD_PDB.format(uid=uni_id)
 
-    # --- VARIANTS (NEW) ---
+    # --- Variants from UniProt (Natural variant) ---
     def _uniprot_json(self, uni_id: str) -> Dict:
         r = self._get(f"{UNIPROT_BASE}/{uni_id}.json")
         r.raise_for_status()
@@ -84,12 +88,7 @@ class StructureFetcher:
         """
         Collect UniProt 'Natural variant' features.
         Returns:
-          {
-            "length": L,
-            "items": [
-              {"pos": 123, "from": "A", "to": "V", "description": "...", "pathogenic_hint": bool}
-            ]
-          }
+          { "length": L, "items": [ {pos, from, to, description, pathogenic_hint}, ... ] }
         """
         j = self._uniprot_json(uni_id)
         L = self._seq_len(j)
@@ -110,12 +109,13 @@ class StructureFetcher:
             low = desc.lower()
             pathogenic_hint = any(k in low for k in ["pathogenic", "disease", "cancer"])
 
-            # amino acid change if available (not always provided in JSON)
             frm = f.get("wildType") or ""
             to = f.get("alternativeSequence") or ""
 
             items.append({
-                "pos": pos, "from": frm, "to": to,
+                "pos": pos,
+                "from": frm,
+                "to": to,
                 "description": desc.strip(),
                 "pathogenic_hint": pathogenic_hint
             })
@@ -127,14 +127,14 @@ class StructureFetcher:
         Make per-residue arrays (1..L) for:
           - any_count   (all variants)
           - patho_count (pathogenic-hint subset)
-          - pop_freq    (placeholder 0..1; fill from gnomAD later)
+          - pop_freq    (placeholder 0..1; future: gnomAD etc.)
         Also return normalized & smoothed versions (0..1).
         """
         data = self.get_uniprot_variants(uni_id)
         L = data["length"]
         any_count   = [0.0] * (L + 1)
         patho_count = [0.0] * (L + 1)
-        pop_freq    = [0.0] * (L + 1)  # future: fill from gnomAD/other
+        pop_freq    = [0.0] * (L + 1)  # TODO: fill from population DB
 
         for v in data["items"]:
             pos = v["pos"]
@@ -178,23 +178,16 @@ def api_domains(uniprot_id: str):
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# NEW: raw variants (from UniProt)
+# Demo endpoint with a visible sine-wave frequency, useful to test coloring
 @app.get("/api/variants/<uniprot_id>")
 def api_variants(uniprot_id: str):
     try:
-        # TODO: fetch from your DB or file
-        # For demo: fake sine wave frequency values
-        import math
-        length = 400  # length of protein (replace with real length)
-        freqs = []
-        for pos in range(1, length+1):
-            val = (math.sin(pos/50) + 1) / 2  # 0..1
-            freqs.append({"pos": pos, "freq": round(val, 3)})
+        length = 400
+        freqs = [{"pos": pos, "freq": round((math.sin(pos/50) + 1) / 2, 3)} for pos in range(1, length+1)]
         return jsonify({"uniprot": uniprot_id, "frequencies": freqs})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-# NEW: per-residue tracks (for gradient coloring)
 @app.get("/api/tracks/<uniprot_id>")
 def api_tracks(uniprot_id: str):
     try:
@@ -204,5 +197,4 @@ def api_tracks(uniprot_id: str):
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    # Run alongside your static server
     app.run(host="0.0.0.0", port=5001)
