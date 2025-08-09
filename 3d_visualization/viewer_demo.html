@@ -1,418 +1,594 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
   <meta charset="UTF-8" />
   <title>Protein 3D Structure Viewer</title>
   <script src="https://unpkg.com/ngl@latest/dist/ngl.js"></script>
   <style>
-    :root { --w: 960px; }
-    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 18px; }
-    #viewport { width: var(--w); height: 520px; border: 1px solid #ccc; }
-    .row { margin-top: 10px; }
-    .group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
-    .btn { padding: 6px 10px; border: 1px solid #bbb; border-radius: 8px; background: #f6f6f6; cursor: pointer; }
-    .btn.active { background: #ffd36a; border-color: #c9a93b; }
-    .btn:disabled { opacity: .55; cursor: default; }
-    .muted { color:#666; font-size:13px; }
-    .spacer { flex: 1 1 auto; }
-    #legendBar { width: var(--w); height:14px; border:1px solid #ccc;
-                 background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000); }
-    #legendScale { width: var(--w); display:flex; justify-content:space-between; font-size:12px; }
-
-    /* Domains track */
-    #domainTrack { width: var(--w); height: 120px; border:1px solid #ddd; margin-top:8px; position:relative; background:#fff; }
-    .domrect { position:absolute; height:18px; border-radius:4px; cursor:pointer; opacity:.9; box-shadow:0 1px 2px rgba(0,0,0,.15); }
-    .tooltip { position:absolute; padding:4px 6px; background:#222; color:#fff; font-size:12px; border-radius:4px; pointer-events:none; white-space:nowrap; z-index: 2; }
-
-    /* Popup legend for secondary structure */
-    #ssLegendBtn { margin-left: 6px; }
-    #ssLegend {
-      position: fixed; bottom: 22px; left: 22px;
-      background: #fff; border: 1px solid #ccc; border-radius: 10px;
-      box-shadow: 0 6px 20px rgba(0,0,0,.18);
-      padding: 10px 12px; display: none; z-index: 10; min-width: 220px;
+    :root{
+      --accent:#f6c44f; --accent2:#c9a93b;
+      --btn:#f6f6f6; --btnb:#bbb; --btntext:#222;
     }
-    #ssLegend .sw { display:inline-block; width:12px; height:12px; margin-right:6px; vertical-align:middle; }
-    #ssLegend .rowl { margin: 4px 0; }
-    #ssLegend .close { float:right; margin-left:10px; cursor:pointer; color:#666; }
+    body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:16px; }
+    #viewport{ width: 960px; height: 520px; border:1px solid #ccc; }
+    .row{ margin:10px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+    .hint{ color:#666; font-size:12px; }
+    .pill{ padding:8px 12px; border:1px solid var(--btnb); border-radius:10px; background:var(--btn); cursor:pointer; }
+    .pill.active{ background:var(--accent); border-color:var(--accent2); }
+    .ghost{ margin-left: 18px; }
+
+    /* легенда heatmap: больше воздуха */
+    #legendBar{
+      width:960px; height:14px; border:1px solid #ccc;
+      background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000);
+      margin-top:6px; margin-bottom:6px;
+    }
+    #legendScale{
+      width:960px; display:flex; justify-content:space-between; font-size:12px;
+      margin-bottom:14px; /* зазор над 2D-графиком */
+    }
+
+    #heatmapPanel{ display:none; }
+    #domainPanel{ display:none; }
+    #varTrack{ border:1px solid #ddd; }
+
+    .popover{ position:absolute; top:170px; left:24px; background:#fff; border:1px solid #ddd;
+              border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.15); padding:16px 18px; }
+    .pop-title{ font-weight:700; font-size:20px; margin-bottom:8px; }
+    .legend-item{ display:flex; align-items:center; gap:10px; margin:6px 0; font-size:20px; }
+    .colorbox{ width:18px; height:18px; border:1px solid #ccc; }
   </style>
 </head>
 <body>
 
-  <h1>Protein 3D Structure Viewer</h1>
+<h1 style="margin-bottom:8px;">Protein 3D Structure Viewer</h1>
 
-  <!-- Load controls -->
-  <div class="row group">
-    <label>UniProt ID:
-      <input type="text" id="uniprotID" value="P02144" />
-    </label>
-    <button class="btn" id="loadBtn">Load structure</button>
-    <span class="muted">Examples: P02144, P38398, P04637…</span>
+<div class="row">
+  <strong>UniProt ID:</strong>
+  <input id="uniprotID" value="P02144" style="width:160px;">
+  <button id="loadBtn" class="pill">Load structure</button>
+  <span class="hint">Examples: P02144, P38398, P04637…</span>
+</div>
+
+<div id="viewport"></div>
+
+<div class="row">
+  <strong>Mode:</strong>
+  <button id="mSStruc"  class="pill active">Secondary structure</button>
+  <button id="mRainbow" class="pill">Rainbow</button>
+  <button id="mHeat"    class="pill">Variants heatmap</button>
+  <button id="mDomains" class="pill">Domains track</button>
+
+  <span class="ghost"></span><strong>Style:</strong>
+  <button id="sCartoon" class="pill active">Cartoon</button>
+  <button id="sStick"   class="pill">Stick</button>
+  <button id="sSphere"  class="pill">Sphere</button>
+
+  <span class="ghost"></span>
+  <button id="btnSpin" class="pill">Spin</button>
+
+  <!-- rsID controls -->
+  <span class="ghost"></span>
+  <strong>rsID:</strong>
+  <input id="rsInput" placeholder="rs123456" style="width:120px;">
+  <button id="rsBtn" class="pill">Highlight</button>
+
+  <span class="ghost"></span>
+  <span class="hint" id="srcHint"></span>
+</div>
+
+<!-- Heatmap controls + legend + 2D stacked track -->
+<div id="heatmapPanel">
+  <div class="row">
+    <strong>Heatmap:</strong>
+    <select id="trackSel">
+      <option value="any">All variants (density)</option>
+      <option value="pathogenic">Pathogenic</option>
+      <option value="benign">Benign</option>
+      <option value="uncertain">Uncertain</option>
+      <option value="predicted">Predicted</option>
+    </select>
+    <strong>Window:</strong>
+    <input id="winSize" type="number" min="1" max="201" step="2" value="15" style="width:70px;">
+    <button id="applyTrack" class="pill">Apply heatmap</button>
   </div>
 
-  <!-- 3D canvas -->
-  <div id="viewport"></div>
-
-  <!-- MODES (exclusive) -->
-  <div class="row group" aria-label="Viewer mode">
-    <span class="muted">Mode:</span>
-    <button class="btn active" id="modeSStruc"  data-mode="sstruc"  title="Color by secondary structure">Secondary structure</button>
-    <button class="btn"         id="modeRainbow" data-mode="rainbow" title="Color by sequence order (N→C, rainbow)">Rainbow</button>
-    <button class="btn"         id="modeHeat"    data-mode="heatmap" title="Color by variant density (blue→white→red)">Variants heatmap</button>
-    <button class="btn"         id="modeDomain"  data-mode="domains" title="Show 2D domains track and highlight ranges">Domains track</button>
-
-    <!-- Popup legend toggle (for Secondary structure) -->
-
-    <span class="spacer"></span>
-
-    <!-- STYLE (independent; mode coloring applies inside each style) -->
-    <span class="muted">Style:</span>
-    <button class="btn active" id="styleCartoon">Cartoon</button>
-    <button class="btn"         id="styleStick">Stick</button>
-    <button class="btn"         id="styleSphere">Sphere</button>
-
-    <!-- Spin, separated to the far right -->
-    <span class="spacer"></span>
-    <button class="btn" id="styleSpin" title="Toggle spinning">Spin</button>
+  <!-- легенда heatmap с цифрами min/max -->
+  <div id="legendBar"></div>
+  <div id="legendScale">
+    <span>Low <span id="legendMin">0</span></span>
+    <span>Medium</span>
+    <span>High <span id="legendMax">1</span></span>
   </div>
 
-  <!-- HEATMAP PANEL (visible in 'heatmap' mode) -->
-  <div id="heatmapPanel" class="row" style="display:none;">
-    <div class="group">
-      <label>Heatmap:
-        <select id="trackSel" title="Choose variant layer">
-          <option value="any">All variants (density)</option>
-          <option value="path">Pathogenic variants</option>
-        </select>
-      </label>
-      <label>Window:
-        <input id="winSize" type="number" min="1" max="201" step="2" value="15" style="width:64px;" title="Odd window size for moving average" />
-      </label>
-      <button class="btn" id="applyTrack">Apply heatmap</button>
-    </div>
-    <div id="legendBar" class="row"></div>
-    <div id="legendScale"><span>Low</span><span>Medium</span><span>High</span></div>
-  </div>
+  <canvas id="varTrack" width="960" height="120" style="margin-top:8px;"></canvas>
+</div>
 
-  <!-- DOMAINS PANEL (visible in 'domains' mode) -->
-  <div id="domainPanel" class="row" style="display:none;">
-    <div class="muted">Hover a block to highlight the corresponding range in 3D. Click to lock/unlock.</div>
-    <div id="domainTrack"></div>
-  </div>
+<!-- 2D domain track -->
+<div id="domainPanel" class="row" style="flex-direction:column; align-items:flex-start;">
+  <canvas id="domainTrack" width="960" height="140"></canvas>
+  <span class="hint">Hover a domain to preview; click a bar to lock/unlock and zoom that region.</span>
+</div>
 
-  <!-- Secondary-structure popup legend -->
-  <div id="ssLegend" role="dialog" aria-label="Secondary structure legend">
-    <span class="close" id="ssLegendClose">✕</span>
-    <div class="rowl"><strong>Secondary structure</strong></div>
-    <div class="rowl"><span class="sw" style="background:magenta;"></span>α-helix</div>
-    <div class="rowl"><span class="sw" style="background:gold;"></span>β-sheet</div>
-    <div class="rowl"><span class="sw" style="background:#ddd; border:1px solid #ccc;"></span>Coil/loop</div>
+<!-- Secondary-structure legend -->
+<div id="ssPopover" class="popover" style="display:none;">
+  <div class="pop-title">Secondary structure</div>
+  <div class="legend-item">
+    <span class="colorbox" style="background:magenta;"></span> α-helix
   </div>
+  <div class="legend-item">
+    <span class="colorbox" style="background:gold;"></span> β-sheet
+  </div>
+  <div class="legend-item">
+    <span class="colorbox" style="background:#ddd;"></span> Coil/loop
+  </div>
+</div>
 
 <script>
   // ---------- NGL setup ----------
   const stage = new NGL.Stage("viewport", { backgroundColor: "white" });
   window.addEventListener("resize", () => stage.handleResize(), false);
 
-  // Auto-detect backend base (localhost for dev, host:5001 for remote preview)
   const API_BASE =
     (location.hostname === "localhost" || location.hostname === "127.0.0.1")
       ? "http://localhost:5001"
       : `http://${location.hostname}:5001`;
 
-  // Global viewer state
-  let comp = null;                // NGL component for the loaded structure
-  let currentMode = "sstruc";     // 'sstruc' | 'rainbow' | 'heatmap' | 'domains'
-  let baseStyle   = "cartoon";    // 'cartoon' | 'stick' | 'sphere'
-  let currentSchemeId = null;     // current heatmap color scheme id
-  let lastTracks = null;          // cache of /api/tracks payload
-  let lastDomains = null;         // cache of /api/domains payload
-  let lockedDomain = null;        // { sele, color } if user locked a domain
+  let comp = null;
+  let mode = "sstruc";         // sstruc | rainbow | heat | domains
+  let style = "cartoon";       // cartoon | stick | sphere
+  let currentSchemeId = null;  // NGL custom color scheme id
+  let lastTracks = null;       // /api/tracks payload
+  let lastDomains = null;      // /api/domains payload
+  let lockedDomain = null;     // { sele, color }
 
-  // Handle ColorMaker registry naming differences across NGL builds
+  // rsID highlight
+  let highlightPos = null;     // residue number
+  let highlightRep = null;     // NGL representation
+
   const Registry = NGL.ColormakerRegistry || NGL.ColorMakerRegistry;
 
-  // ---------- Helpers ----------
-  function clearReps() { if (comp) comp.removeAllRepresentations(); }
+  const CLASS_COLORS = {
+    pathogenic: "#d73027",
+    benign:     "#1a9850",
+    uncertain:  "#fee08b",
+    predicted:  "#91bfdb"
+  };
 
-  // Returns the color parameter to use for the current mode
-  function currentColorParam() {
-    if (currentMode === "sstruc")   return "sstruc";
-    if (currentMode === "rainbow")  return "residueindex";
-    if (currentMode === "heatmap")  return currentSchemeId || "white"; // set by applyHeatmap
-    if (currentMode === "domains")  return "white";                    // faint base; domains overlay
-    return "sstruc";
-  }
+  function setActive(el, on){ el.classList.toggle("active", !!on); }
+  function show(el, on){ el.style.display = on ? "block" : "none"; }
+  function clearReps(){ if (comp) comp.removeAllRepresentations(); }
 
-  // Apply the selected base style with the given color source (or from mode)
-  function applyBaseStyle() {
-    if (!comp) return;
-    const color = currentColorParam();
-
-    clearReps();
-    if (baseStyle === "stick") {
-      comp.addRepresentation("licorice", { color, multipleBond: true, radiusScale: 0.35, opacity: currentMode==="domains" ? 0.25 : 1.0 });
-    } else if (baseStyle === "sphere") {
-      comp.addRepresentation("spacefill", { color, scale: 0.35, opacity: currentMode==="domains" ? 0.25 : 1.0 });
+  function addStyleRep(color){
+    const common = { color };
+    if (style === "cartoon"){
+      comp.addRepresentation("cartoon", { ...common, aspectRatio: 5, arrowSize: 1.2, scale: 0.7 });
+      comp.addRepresentation("backbone", { opacity: 0.25 });
+    } else if (style === "stick"){
+      comp.addRepresentation("licorice", { ...common, multipleBond: true });
     } else {
-      // cartoon (default)
-      comp.addRepresentation("cartoon", {
-        color, aspectRatio: 5, arrowSize: 1.2, scale: 0.7,
-        opacity: currentMode==="domains" ? 0.25 : 1.0
-      });
-      if (currentMode !== "domains") comp.addRepresentation("backbone", { opacity: 0.25 });
+      comp.addRepresentation("spacefill", { ...common, scale: 0.4 });
     }
   }
+  function applyBaseColoring(){
+    clearReps();
+    if (mode === "rainbow"){
+      addStyleRep("residueindex");
+    } else {
+      addStyleRep("sstruc");
+    }
+    // вернуть подсветку rsID (если была)
+    applyHighlight3D();
+  }
 
-  // ---------- API calls ----------
-  async function fetchTracks(uid, win) {
+  function makeBWR(values01){
+    return Registry.addScheme(function(){
+      this.atomColor = function(atom){
+        const v = values01[atom.resno] ?? 0.0; // normalized 0..1 per residue
+        if (v <= 0.5){
+          const t = v / 0.5;
+          const r = Math.round(255 * t);
+          const g = Math.round(255 * t);
+          const b = 255;
+          return (r<<16)|(g<<8)|b; // blue->white
+        } else {
+          const t = (v - 0.5) / 0.5;
+          const r = 255, g = Math.round(255*(1-t)), b = Math.round(255*(1-t));
+          return (r<<16)|(g<<8)|b; // white->red
+        }
+      };
+    });
+  }
+
+  async function fetchTracks(uid, win){
     const r = await fetch(`${API_BASE}/api/tracks/${uid}?win=${win}`);
     if (!r.ok) throw new Error(`tracks ${r.status}`);
     lastTracks = await r.json();
+    document.getElementById("srcHint").textContent =
+      lastTracks?.source === "proteins_variation"
+        ? `Variants: Proteins API (n=${lastTracks.total_variants})`
+        : `Variants: UniProt fallback (n=${lastTracks?.total_variants ?? "?"})`;
     return lastTracks;
   }
-
-  async function fetchDomains(uid) {
+  async function fetchDomains(uid){
     const r = await fetch(`${API_BASE}/api/domains/${uid}`);
     if (!r.ok) throw new Error(`domains ${r.status}`);
     lastDomains = await r.json();
     return lastDomains;
   }
 
-  // ---------- Heatmap (blue→white→red) ----------
-  function makeBWR(values01) {
-    // values01 is 1-based: index == residue number; each value in 0..1
-    return Registry.addScheme(function () {
-      this.atomColor = function (atom) {
-        const v = values01[atom.resno] ?? 0.0;
-        if (v <= 0.5) {
-          const t = v / 0.5;
-          const r = Math.round(255 * t);
-          const g = Math.round(255 * t);
-          const b = 255;
-          return (r<<16)|(g<<8)|b;           // blue -> white
-        } else {
-          const t = (v - 0.5) / 0.5;
-          const r = 255, g = Math.round(255 * (1 - t)), b = Math.round(255 * (1 - t));
-          return (r<<16)|(g<<8)|b;           // white -> red
-        }
-      };
-    });
-  }
-
-  async function applyHeatmap(which) {
-    if (!comp) return;
-
-    const uid = document.getElementById("uniprotID").value.trim();
-    const win = parseInt(document.getElementById("winSize").value || "15", 10);
-
-    if (!lastTracks || lastTracks.uniprot !== uid || lastTracks.window !== win) {
-      await fetchTracks(uid, win);
+  async function applyHeatmap(which){
+    const id  = document.getElementById("uniprotID").value.trim();
+    const win = parseInt(document.getElementById("winSize").value||"15",10);
+    if (!lastTracks || lastTracks.uniprot !== id || lastTracks.window !== win){
+      await fetchTracks(id, win);
+      drawVariantTrack();
     }
     const arr = lastTracks?.smooth?.[which] || lastTracks?.smooth?.any;
-    if (!arr || !Array.isArray(arr)) return;
+    if (!arr) return;
 
-    if (currentSchemeId && Registry.removeScheme) {
-      try { Registry.removeScheme(currentSchemeId); } catch {}
-    }
+    if (currentSchemeId && Registry.removeScheme) try { Registry.removeScheme(currentSchemeId); } catch {}
     currentSchemeId = makeBWR(arr);
 
-    // Re-paint base style with the new scheme
-    applyBaseStyle();
+    clearReps();
+    addStyleRep(currentSchemeId);
     if (stage.viewer?.requestRender) stage.viewer.requestRender();
+
+    // числовые подписи min/max по текущему массиву
+    const v = (arr || []).slice(1);
+    const vmin = v.length ? Math.min(...v) : 0;
+    const vmax = v.length ? Math.max(...v) : 1;
+    document.getElementById("legendMin").textContent = vmin.toFixed(2);
+    document.getElementById("legendMax").textContent = vmax.toFixed(2);
+
+    // вернуть подсветку rsID поверх теплокарты
+    applyHighlight3D();
   }
 
-  // ---------- Domains 2D track + hover highlight ----------
-  function colorForIndex(i) {
-    const pal = ["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4","#46f0f0","#f032e6","#bcf60c",
-                 "#fabebe","#008080","#e6beff","#9A6324","#fffac8","#800000","#aaffc3","#808000"];
-    return pal[i % pal.length];
-  }
+  function drawVariantTrack(){
+    const canvas = document.getElementById("varTrack");
+    if (!canvas || !lastTracks?.bins) return;
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0,0,W,H);
 
-  function drawDomainTrack() {
-    const box = document.getElementById("domainTrack");
-    box.innerHTML = "";
-    if (!lastDomains || !lastDomains.domains?.length || !comp) return;
-
-    const L = lastDomains.length || 1;
-    const W = box.clientWidth - 10;
-    const top = 12, rowH = 20, gap = 6;
-
-    const lanes = [];   // simple lane packing
-    let hoverRep = null;
-
-    const tip = document.createElement("div");
-    tip.className = "tooltip";
-    tip.style.display = "none";
-    box.appendChild(tip);
-
-    lastDomains.domains.forEach((d, i) => {
-      const x1 = Math.round((d.start - 1) / L * W) + 5;
-      const x2 = Math.round(d.end / L * W) + 5;
-      const w  = Math.max(4, x2 - x1);
-
-      let lane = 0;
-      while (lanes[lane] && lanes[lane] > x1) lane++;
-      lanes[lane] = x2 + 6;
-
-      const y = top + lane * (rowH + gap);
-
-      const el = document.createElement("div");
-      el.className = "domrect";
-      el.style.left = x1 + "px";
-      el.style.top  = y  + "px";
-      el.style.width = w + "px";
-      el.style.background = colorForIndex(i);
-      box.appendChild(el);
-
-      const label = `${d.type || "Domain"}: ${d.description || ""} (${d.start}-${d.end})`;
-      const sele = `${d.start}-${d.end}`;
-
-      const showTip = (ev) => {
-        tip.textContent = label;
-        tip.style.left = (ev.offsetX + 10) + "px";
-        tip.style.top  = (ev.offsetY + 10) + "px";
-        tip.style.display = "block";
-      };
-
-      el.onmouseenter = (ev) => {
-        if (lockedDomain) return;
-        showTip(ev);
-        if (hoverRep) hoverRep.dispose();
-        // Overlay with the chosen style, colored by domain
-        hoverRep = comp.addRepresentation(
-          baseStyle === "stick" ? "licorice" :
-          baseStyle === "sphere" ? "spacefill" : "cartoon",
-          {
-            sele,
-            color: colorForIndex(i),
-            opacity: 0.95,
-            scale: baseStyle === "sphere" ? 0.4 : 0.8,
-            multipleBond: baseStyle === "stick"
-          }
-        );
-        comp.autoView(sele);
-      };
-      el.onmousemove = showTip;
-      el.onmouseleave = () => {
-        tip.style.display = "none";
-        if (!lockedDomain && hoverRep) { hoverRep.dispose(); hoverRep = null; }
-      };
-      el.onclick = () => {
-        lockedDomain = lockedDomain ? null : { sele, color: colorForIndex(i) };
-        if (!lockedDomain && hoverRep) { hoverRep.dispose(); hoverRep = null; }
-      };
+    // максимум для шкалы
+    let maxStack = 0;
+    lastTracks.bins.forEach(b => {
+      const s = Object.values(b.totals).reduce((a,v)=>a+v,0);
+      if (s > maxStack) maxStack = s;
     });
 
-    // Faint base under domain highlights using the chosen style
-    applyBaseStyle();
-  }
+    // больше слева под ось Y
+    const pad = {l:36, r:6, t:10, b:22};
+    const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
 
-  // ---------- Mode switching (exclusive) ----------
-  function setActiveModeBtn(whichId) {
-    for (const id of ["modeSStruc","modeRainbow","modeHeat","modeDomain"]) {
-      document.getElementById(id).classList.toggle("active", id === whichId);
+    const n = lastTracks.bins.length;
+    const barW = Math.max(2, Math.floor(plotW / n) - 2);
+
+    canvas._barIndex = [];
+    ctx.font = "12px system-ui";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = "#333";
+
+    // ось Y и тики (0..maxStack)
+    ctx.strokeStyle = "#aaa";
+    ctx.beginPath();
+    ctx.moveTo(pad.l-0.5, pad.t);
+    ctx.lineTo(pad.l-0.5, pad.t + plotH);
+    ctx.stroke();
+
+    const ticks = 4;
+    for (let i=0; i<=ticks; i++){
+      const frac = i / ticks;
+      const y = pad.t + plotH * (1 - frac);
+      const val = Math.round(maxStack * frac);
+      ctx.beginPath();
+      ctx.moveTo(pad.l-4, y+0.5);
+      ctx.lineTo(pad.l-0.5, y+0.5);
+      ctx.stroke();
+      const label = String(val);
+      const tw = ctx.measureText(label).width;
+      ctx.fillText(label, pad.l - 8 - tw, y);
     }
-  }
-  function setActiveStyleBtn(whichId) {
-    for (const id of ["styleCartoon","styleStick","styleSphere"]) {
-      document.getElementById(id).classList.toggle("active", id === whichId);
+
+    // сами столбики
+    lastTracks.bins.forEach((b,i)=>{
+      const x0 = pad.l + i * (plotW / n);
+      let y = pad.t + plotH;
+      const order = ["predicted","uncertain","benign","pathogenic"];
+      order.forEach(k=>{
+        const val = b.totals[k] || 0;
+        if (val <= 0 || maxStack <= 0) return;
+        const h = plotH * (val / maxStack);
+        ctx.fillStyle = CLASS_COLORS[k];
+        ctx.fillRect(x0, y-h, barW, h);
+        y -= h;
+      });
+      canvas._barIndex.push({x:x0, y:pad.t, w:barW, h:plotH, start:b.start, end:b.end, totals:b.totals});
+    });
+
+    // вертикальная метка rsID (поверх баров)
+    if (highlightPos && lastTracks?.length){
+      const L = lastTracks.length;
+      const xPos = pad.l + Math.round((highlightPos-1)/L * plotW);
+      ctx.save();
+      ctx.strokeStyle = "#000000";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(xPos + 0.5, pad.t - 2);
+      ctx.lineTo(xPos + 0.5, pad.t + plotH + 2);
+      ctx.stroke();
+      ctx.restore();
     }
+
+    // tooltip
+    canvas.onmousemove = (ev)=>{
+      const r = canvas.getBoundingClientRect();
+      const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+      const hit = canvas._barIndex.find(b => mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h);
+      canvas.title = hit ? (
+        `${hit.start}-${hit.end}\n` +
+        `pathogenic: ${hit.totals.pathogenic|0}\n` +
+        `benign: ${hit.totals.benign|0}\n` +
+        `uncertain: ${hit.totals.uncertain|0}\n` +
+        `predicted: ${hit.totals.predicted|0}`
+      ) : "";
+    };
+    // zoom on click
+    canvas.onclick = (ev)=>{
+      if (!comp) return;
+      const r = canvas.getBoundingClientRect();
+      const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+      const hit = canvas._barIndex.find(b => mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h);
+      if (hit) comp.autoView(`${hit.start}-${hit.end}`);
+    };
+
+    // мини-легенда классов
+    const yLeg = H - 10;
+    let xLeg = pad.l;
+    ["pathogenic","benign","uncertain","predicted"].forEach(k=>{
+      ctx.fillStyle = CLASS_COLORS[k];
+      ctx.fillRect(xLeg, yLeg-8, 10, 10);
+      ctx.fillStyle = "#333";
+      ctx.fillText(k, xLeg+14, yLeg);
+      xLeg += ctx.measureText(k).width + 34;
+    });
   }
 
-  async function setMode(mode) {
-    currentMode = mode;
-    setActiveModeBtn(
-      mode === "sstruc"  ? "modeSStruc"  :
-      mode === "rainbow" ? "modeRainbow" :
-      mode === "heatmap" ? "modeHeat"    : "modeDomain"
-    );
+  function applyDomainBase(){
+    if (!comp) return;
+    clearReps();
+    const base = "#cfcfcf"; // светло-серый
+    if (style === "cartoon"){
+      comp.addRepresentation("cartoon",  { color: base, opacity: 0.30, aspectRatio:5, arrowSize:1.2, scale:0.7 });
+      comp.addRepresentation("backbone", { color: base, opacity: 0.40 }); // слегка видимый каркас
+    } else if (style === "stick"){
+      comp.addRepresentation("licorice", { color: base, opacity: 0.35, multipleBond: true });
+    } else { // sphere
+      comp.addRepresentation("spacefill", { color: base, opacity: 0.30, scale: 0.4 });
+    }
+    // вернуть подсветку rsID поверх серой базы
+    applyHighlight3D();
+  }
 
-    const heatmapPanel = document.getElementById("heatmapPanel");
-    const domainPanel  = document.getElementById("domainPanel");
+  function drawDomainTrack(){
+    const canvas = document.getElementById("domainTrack");
+    if (!canvas) return;
+    const ctx = canvas.getContext("2d");
+    const W = canvas.width, H = canvas.height;
+    ctx.clearRect(0,0,W,H);
+    if (!lastDomains?.domains?.length) return;
 
-    // <-- НОВОЕ: легенда видна только в режиме sstruc
-    legend.style.display = (mode === "sstruc") ? "block" : "none";
+    const L = lastDomains.length || Math.max(...lastDomains.domains.map(d=>d.end));
+    const pad = {l:8, r:8, t:20, b:16};
+    const plotW = W - pad.l - pad.r;
+    const rowH = 18, gap = 6;
 
-    if (!comp) {
-      heatmapPanel.style.display = (mode === "heatmap") ? "block" : "none";
-      domainPanel.style.display  = (mode === "domains") ? "block" : "none";
+    const rows = [];
+    canvas._domHits = [];
+
+    function colorForIndex(i){
+      const pal=["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4","#46f0f0","#f032e6","#bcf60c",
+                "#fabebe","#008080","#e6beff","#9A6324","#fffac8","#800000","#aaffc3","#808000"];
+      return pal[i % pal.length];
+    }
+
+    // --- сами домены ---
+    lastDomains.domains.forEach((d,i)=>{
+      const x1 = pad.l + Math.round((d.start-1)/L * plotW);
+      const x2 = pad.l + Math.round((d.end)/L * plotW);
+      const w  = Math.max(4, x2-x1);
+
+      // packing рядов, чтобы меньше перекрытий
+      let row = 0;
+      while (rows[row] && rows[row] > x1) row++;
+      rows[row] = x2 + 6;
+
+      const y = pad.t + row * (rowH + gap);
+      const color = colorForIndex(i);
+
+      ctx.fillStyle = color;
+      ctx.globalAlpha = 0.9;
+      ctx.fillRect(x1, y, w, rowH);
+      ctx.globalAlpha = 1;
+
+      ctx.strokeStyle = "#fff";
+      ctx.strokeRect(x1+.5, y+.5, w-1, rowH-1);
+
+      canvas._domHits.push({
+        x:x1, y:y, w:w, h:rowH,
+        sele:`${d.start}-${d.end}`,
+        label:`${d.type||"Domain"}: ${d.description||""} (${d.start}-${d.end})`,
+        color
+      });
+    });
+
+    // --- вертикальная метка rsID (чёрная) ---
+    if (highlightPos && lastDomains?.domains?.length){
+      const xPos = pad.l + Math.round((highlightPos-1)/L * plotW);
+      ctx.save();
+      ctx.strokeStyle = "#000000";  // чёрный
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(xPos + 0.5, pad.t - 2);
+      ctx.lineTo(xPos + 0.5, H - pad.b + 2);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    // --- hover/lock поведение ---
+    let hoverRep = null;
+    canvas.onmousemove = (ev)=>{
+      const r = canvas.getBoundingClientRect();
+      const mx = ev.clientX - r.left, my = ev.clientY - r.top;
+      const hit = canvas._domHits.find(b => mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h);
+      canvas.title = hit ? hit.label : "";
+      if (!comp) return;
+      if (lockedDomain) return;
+      if (hoverRep) { hoverRep.dispose(); hoverRep = null; }
+      if (hit){
+        hoverRep = comp.addRepresentation("cartoon", { sele: hit.sele, color: hit.color, opacity:0.95, scale:0.8 });
+      }
+    };
+    canvas.onmouseleave = ()=>{
+      canvas.title = "";
+      if (!lockedDomain && hoverRep){ hoverRep.dispose(); hoverRep = null; }
+    };
+    canvas.onclick = (event)=>{
+      if (!comp) return;
+      if (lockedDomain){ lockedDomain = null; if (hoverRep){ hoverRep.dispose(); hoverRep=null; } }
+      else {
+        const r = canvas.getBoundingClientRect();
+        const mx = event.clientX - r.left, my = event.clientY - r.top;
+        const hit = canvas._domHits.find(b => mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h);
+        if (hit){
+          lockedDomain = { sele: hit.sele, color: hit.color };
+          comp.autoView(hit.sele);
+        }
+      }
+    };
+  }
+
+
+  // восстановление подсветки rsID на 3D после смены режима/стиля
+  function applyHighlight3D(){
+    if (!comp || !highlightPos) return;
+    try { if (highlightRep) highlightRep.dispose(); } catch(e){}
+    const sele = `${highlightPos}-${highlightPos}`;
+    highlightRep = comp.addRepresentation("spacefill", { sele, color: "#00ff55", scale: 1.0, opacity: 1.0 });
+    comp.addRepresentation("licorice", { sele, color: "#00ff55" });
+  }
+
+  async function highlightRsid(){
+    const id = document.getElementById("uniprotID").value.trim();
+    const rs = document.getElementById("rsInput").value.trim();
+    if (!id || !rs) return;
+
+    const r = await fetch(`${API_BASE}/api/rspos/${id}/${encodeURIComponent(rs)}`);
+    if (!r.ok){ alert("Failed to resolve rsID"); return; }
+    const data = await r.json();
+    if (!data.positions || !data.positions.length){
+      alert("rsID not found for this UniProt entry");
       return;
     }
+    highlightPos = data.positions[0];
 
-    if (mode === "sstruc" || mode === "rainbow") {
-      heatmapPanel.style.display = "none";
-      domainPanel.style.display  = "none";
-      applyBaseStyle();
-    } else if (mode === "heatmap") {
-      domainPanel.style.display  = "none";
-      heatmapPanel.style.display = "block";
-      await applyHeatmap(document.getElementById("trackSel").value);
-    } else { // domains
-      heatmapPanel.style.display = "none";
-      domainPanel.style.display  = "block";
-      const uid = document.getElementById("uniprotID").value.trim();
-      if (!lastDomains || lastDomains.uniprot !== uid) await fetchDomains(uid);
-      drawDomainTrack();
-    }
+    // 3D
+    applyHighlight3D();
+    if (comp) comp.autoView(`${highlightPos}-${highlightPos}`);
+
+    // 2D
+    drawVariantTrack();
   }
 
+  const btnsMode = {
+    sstruc:  document.getElementById("mSStruc"),
+    rainbow: document.getElementById("mRainbow"),
+    heat:    document.getElementById("mHeat"),
+    domains: document.getElementById("mDomains")
+  };
+  const btnsStyle = {
+    cartoon: document.getElementById("sCartoon"),
+    stick:   document.getElementById("sStick"),
+    sphere:  document.getElementById("sSphere")
+  };
 
-  // ---------- Load structure ----------
-  async function loadStructure() {
+  function applyModeButtons(){
+    Object.entries(btnsMode).forEach(([k,el]) => setActive(el, k===mode));
+    show(document.getElementById("heatmapPanel"), mode === "heat");
+    show(document.getElementById("domainPanel"), mode === "domains");
+    show(document.getElementById("ssPopover"),  mode === "sstruc");
+  }
+  function applyStyleButtons(){
+    Object.entries(btnsStyle).forEach(([k,el]) => setActive(el, k===style));
+  }
+
+  Object.entries(btnsMode).forEach(([k,el])=>{
+    el.onclick = async () => {
+      mode = k;
+      applyModeButtons();
+      if (!comp) return;
+      if (mode === "heat"){
+        await applyHeatmap(document.getElementById("trackSel").value);
+      } else if (mode === "domains") {
+        const id = document.getElementById("uniprotID").value.trim();
+        if (!lastDomains || lastDomains.uniprot !== id) await fetchDomains(id);
+        drawDomainTrack();
+        applyBaseColoring();
+        comp.addRepresentation("cartoon", { color:"white", opacity:0.25, aspectRatio:5, arrowSize:1.2, scale:0.7 });
+      } else {
+        applyBaseColoring();
+      }
+    };
+  });
+
+  Object.entries(btnsMode).forEach(([k,el])=>{
+    el.onclick = async () => {
+      mode = k;
+      applyModeButtons();
+      if (!comp) return;
+      if (mode === "heat"){
+        await applyHeatmap(document.getElementById("trackSel").value);
+      } else if (mode === "domains") {
+        const id = document.getElementById("uniprotID").value.trim();
+        if (!lastDomains || lastDomains.uniprot !== id) await fetchDomains(id);
+        drawDomainTrack();
+        applyDomainBase(); // серый базовый стиль
+      } else {
+        applyBaseColoring();
+      }
+    };
+  });
+
+
+  document.getElementById("btnSpin").onclick = () => stage.setSpin(!stage.parameters.spin);
+  document.getElementById("applyTrack").onclick = () =>
+    applyHeatmap(document.getElementById("trackSel").value);
+  document.getElementById("rsBtn").onclick = () =>
+    highlightRsid().catch(console.error);
+
+  async function loadStructure(){
     const id = document.getElementById("uniprotID").value.trim();
-    if (!id) return alert("Enter UniProt ID.");
-
+    if (!id) return alert("Enter UniProt ID");
     lockedDomain = null;
     lastTracks = null;
     lastDomains = null;
+    highlightPos = null;        // сбрасываем подсветку при загрузке нового белка
+    try { if (highlightRep) highlightRep.dispose(); } catch(e){}
 
     stage.removeAllComponents();
     comp = await stage.loadFile(`https://alphafold.ebi.ac.uk/files/AF-${id}-F1-model_v4.pdb`);
-    applyBaseStyle();
+    applyBaseColoring();
     comp.autoView();
 
-    if (currentMode === "heatmap") {
-      await applyHeatmap(document.getElementById("trackSel").value);
-    } else if (currentMode === "domains") {
-      await fetchDomains(id);
-      drawDomainTrack();
-    }
+    if (mode === "heat")     await applyHeatmap(document.getElementById("trackSel").value);
+    if (mode === "domains") { await fetchDomains(id); drawDomainTrack(); }
   }
 
-  // ---------- Wire up UI ----------
-  document.getElementById("loadBtn").onclick = loadStructure;
+  document.getElementById("loadBtn").onclick = () => loadStructure().catch(console.error);
 
-  // Modes
-  document.getElementById("modeSStruc").onclick  = () => setMode("sstruc");
-  document.getElementById("modeRainbow").onclick = () => setMode("rainbow");
-  document.getElementById("modeHeat").onclick    = () => setMode("heatmap");
-  document.getElementById("modeDomain").onclick  = () => setMode("domains");
-
-  // Styles
-  document.getElementById("styleCartoon").onclick = () => { baseStyle = "cartoon"; setActiveStyleBtn("styleCartoon"); applyBaseStyle(); if (currentMode==="heatmap") applyHeatmap(document.getElementById("trackSel").value); if (currentMode==="domains") drawDomainTrack(); };
-  document.getElementById("styleStick").onclick   = () => { baseStyle = "stick";   setActiveStyleBtn("styleStick");   applyBaseStyle(); if (currentMode==="heatmap") applyHeatmap(document.getElementById("trackSel").value); if (currentMode==="domains") drawDomainTrack(); };
-  document.getElementById("styleSphere").onclick  = () => { baseStyle = "sphere";  setActiveStyleBtn("styleSphere");  applyBaseStyle(); if (currentMode==="heatmap") applyHeatmap(document.getElementById("trackSel").value); if (currentMode==="domains") drawDomainTrack(); };
-
-  // Spin
-  document.getElementById("styleSpin").onclick = () => stage.setSpin(!stage.parameters.spin);
-
-  // Heatmap panel actions
-  document.getElementById("applyTrack").onclick = () =>
-    applyHeatmap(document.getElementById("trackSel").value);
-  document.getElementById("trackSel").onchange  =
-    () => (currentMode === "heatmap") && applyHeatmap(document.getElementById("trackSel").value);
-  document.getElementById("winSize").onchange   =
-    () => (currentMode === "heatmap") && applyHeatmap(document.getElementById("trackSel").value);
-
-  // Popup legend
-  const legend = document.getElementById("ssLegend");
-  document.getElementById("ssLegendBtn").onclick   = () => { legend.style.display = (legend.style.display === "block" ? "none" : "block"); };
-  document.getElementById("ssLegendClose").onclick = () => { legend.style.display = "none"; };
-
-  // Initial load & defaults
-  setActiveStyleBtn("styleCartoon");
-  setMode("sstruc").catch(console.error);
+  applyModeButtons(); applyStyleButtons();
   loadStructure().catch(console.error);
 </script>
 </body>
