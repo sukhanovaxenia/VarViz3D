@@ -1,0 +1,102 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <title>3D Protein Viewer Demo</title>
+  <script src="https://unpkg.com/ngl@latest/dist/ngl.js"></script>
+</head>
+<body>
+  <h1>Protein 3D Structure Viewer</h1>
+  <div>
+    <label>UniProt ID: <input type="text" id="uniprotID" placeholder="e.g. P38398"></label>
+    <button id="loadBtn">Load Structure</button>
+  </div>
+  <div id="viewport" style="width: 600px; height: 400px; border: 1px solid #ccc;"></div>
+
+  <script>
+    const stage = new NGL.Stage("viewport", { backgroundColor: "white" });
+    window.addEventListener("resize", () => stage.handleResize(), false);
+
+    function clearReps(comp){ comp.removeAllRepresentations(); }
+
+    // cartoon = helices (spirals) + arrows on strands
+    function addCartoon(comp){
+      comp.addRepresentation("cartoon", {
+        aspectRatio: 5.0,   // thinner helices
+        arrowSize: 1.2,     // larger arrows on beta strands
+        scale: 0.7,         // overall ribbon thickness
+        color: "sstruc"
+      });
+      // thin thread underneath (pick ONE of these)
+      //comp.addRepresentation("backbone", { opacity: 0.35 });               // option A
+      comp.addRepresentation("tube", { radiusScale: 0.15, opacity: 0.35 }); // option B
+    }
+
+    function addRibbon(comp){
+      comp.addRepresentation("ribbon", { scale: 0.8, color: "sstruc" });
+      comp.addRepresentation("backbone", { opacity: 0.30 });
+    }
+
+    function addThreadOnly(comp){
+      comp.addRepresentation("backbone", { opacity: 0.85 });
+      // or: comp.addRepresentation("tube", { radiusScale: 0.12, opacity: 0.85 });
+    }
+
+    async function loadAndShow(uniprotId, style="cartoon"){
+      if(!uniprotId) return alert("Enter a UniProt ID");
+      const pdbUrl = `https://alphafold.ebi.ac.uk/files/AF-${uniprotId}-F1-model_v4.pdb`;
+
+      stage.removeAllComponents();
+      try{
+        const comp = await stage.loadFile(pdbUrl);
+        clearReps(comp);
+
+        if(style === "cartoon") addCartoon(comp);
+        else if(style === "ribbon") addRibbon(comp);
+        else if(style === "thread") addThreadOnly(comp);
+
+        comp.autoView();
+      }catch(err){
+        alert("Failed to load structure (check UniProt ID or model availability): " + err);
+      }
+    }
+
+    const idInput = document.getElementById("uniprotID");
+    let currentStyle = "cartoon";
+
+    document.getElementById("loadBtn").onclick = () =>
+      loadAndShow(idInput.value.trim(), currentStyle);
+
+    function setStyle(style){
+      currentStyle = style;
+      const id = idInput.value.trim();
+      if(stage.compList.length && id) loadAndShow(id, style);
+    }
+
+    // extras: spin / reset helpers (hook to buttons if you add them)
+    function toggleSpin(){ stage.setSpin(!stage.parameters.spin); }
+    function resetView(){
+      if(stage.compList[0]) stage.compList[0].autoView();
+    }
+
+  </script>
+
+  <div id="legend" style="margin-top:10px; font-family:sans-serif; font-size:14px;">
+    <strong>Legend:</strong>
+    <span style="display:inline-block; width:12px; height:12px; background-color:magenta; margin-right:4px;"></span> α-helix
+    <span style="display:inline-block; width:12px; height:12px; background-color:gold; margin-left:10px; margin-right:4px;"></span> β-sheet
+    <span style="display:inline-block; width:12px; height:12px; background-color:lightgray; margin-left:10px; margin-right:4px; border:1px solid #ccc;"></span> Coil/loop
+  </div>
+
+
+  <div style="margin-top:8px;">
+    <button onclick="setStyle('cartoon')">Cartoon (spirals + arrows)</button>
+    <button onclick="setStyle('ribbon')">Ribbon</button>
+    <button onclick="setStyle('thread')">Thin thread</button>
+    <button onclick="toggleSpin()">Spin</button>
+    <button onclick="resetView()">Reset view</button>
+  </div>
+
+
+</body>
+</html>
