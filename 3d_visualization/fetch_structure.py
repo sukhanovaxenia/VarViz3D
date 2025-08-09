@@ -1,43 +1,71 @@
+# 3d_visualization/fetch_structure.py
 import requests
+from typing import List, Dict, Optional
+from flask import Flask, jsonify
+from flask_cors import CORS
+
+TIMEOUT = 20
+UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb"
+PDB_BASE = "https://data.rcsb.org/rest/v1/core/uniprot"
+ALPHAFOLD_PDB = "https://alphafold.ebi.ac.uk/files/AF-{uid}-F1-model_v4.pdb"
 
 class StructureFetcher:
-    UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb"
-    PDB_BASE = "https://data.rcsb.org/rest/v1/core/uniprot"
-    ALPHAFOLD_URL = "https://alphafold.ebi.ac.uk/entry/"
+    def __init__(self):
+        self.s = requests.Session()
 
-    def get_uniprot_id(self, gene_name):
-        url = f"{self.UNIPROT_BASE}/search?query=gene:{gene_name}+AND+organism_id:9606&format=json&size=1"
-        res = requests.get(url)
-        res.raise_for_status()
-        results = res.json().get('results', [])
-        return results[0]['primaryAccession'] if results else None
+    def _get(self, url: str):
+        return self.s.get(url, timeout=TIMEOUT)
 
-    def get_domain_info(self, uni_id):
-        url = f"{self.UNIPROT_BASE}/{uni_id}.json"
-        res = requests.get(url)
-        res.raise_for_status()
-        features = res.json().get('features', [])
-        return [
-            (f['type'], f['location']['start']['value'], f['location']['end']['value'], f.get('description', ''))
-            for f in features if f['type'] == 'Domain'
-        ]
+    def get_domain_info(self, uni_id: str) -> List[Dict]:
+        """
+        Return UniProt features as domain-like ranges:
+        [{"start":..,"end":..,"description":..,"type":..}, ...]
+        """
+        url = f"{UNIPROT_BASE}/{uni_id}.json"
+        r = self._get(url); r.raise_for_status()
+        features = r.json().get("features", [])
 
-    def get_pdb_ids(self, uni_id):
-        url = f"{self.PDB_BASE}/{uni_id}"
-        res = requests.get(url)
-        if res.status_code == 200:
-            data = res.json()
-            return data['rcsb_uniprot_container_identifiers'].get('entry_ids', [])
-        return []
+        ACCEPT = {
+            "Domain", "Region", "DNA binding", "Zinc finger", "Repeat",
+            "Coiled coil", "Topological domain", "Transmembrane"
+        }
 
-    def get_alphafold_url(self, uni_id):
-        return f"{self.ALPHAFOLD_URL}{uni_id}"
+        out: List[Dict] = []
+        for f in features:
+            ftype = f.get("type")
+            if ftype not in ACCEPT:
+                continue
+            loc = f.get("location", {})
+            try:
+                start = int(loc["start"]["value"])
+                end = int(loc["end"]["value"])
+            except Exception:
+                continue
+            desc = (f.get("description") or ftype).strip()
+            out.append({"start": start, "end": end, "description": desc, "type": ftype})
+
+        out.sort(key=lambda x: (x["start"], x["end"]))
+        return out
+
+    def alphafold_pdb_url(self, uni_id: str) -> str:
+        return ALPHAFOLD_PDB.format(uid=uni_id)
+
+# ---- Flask API ----
+app = Flask(__name__)
+CORS(app)
+F = StructureFetcher()
+
+@app.get("/")
+def root():
+    return "VarViz3D API: /api/domains/<uniprot_id>"
+
+@app.get("/api/domains/<uniprot_id>")
+def api_domains(uniprot_id: str):
+    try:
+        return jsonify({"uniprot": uniprot_id, "domains": F.get_domain_info(uniprot_id)})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
-    fetcher = StructureFetcher()
-    gene = "BRCA1"
-    print("UniProt ID:", fetcher.get_uniprot_id(gene))
-    print("Domains:", fetcher.get_domain_info("P38398"))
-    print("PDB entries:", fetcher.get_pdb_ids("P38398"))
-    print("AlphaFold URL:", fetcher.get_alphafold_url("P38398"))
-
+    # Run alongside your static server
+    app.run(host="0.0.0.0", port=5001)

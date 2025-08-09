@@ -13,34 +13,61 @@
   </div>
   <div id="viewport" style="width: 600px; height: 400px; border: 1px solid #ccc;"></div>
 
+
   <script>
     const stage = new NGL.Stage("viewport", { backgroundColor: "white" });
     window.addEventListener("resize", () => stage.handleResize(), false);
 
+    const API_BASE = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+        ? "http://localhost:5001"
+        : `http://${location.hostname}:5001`;
+
     function clearReps(comp){ comp.removeAllRepresentations(); }
 
-    // cartoon = helices (spirals) + arrows on strands
     function addCartoon(comp){
-      comp.addRepresentation("cartoon", {
-        aspectRatio: 5.0,   // thinner helices
-        arrowSize: 1.2,     // larger arrows on beta strands
-        scale: 0.7,         // overall ribbon thickness
-        color: "sstruc"
+      comp.addRepresentation("cartoon", { aspectRatio: 5, arrowSize: 1.2, scale: 0.7, color: "sstruc" });
+      comp.addRepresentation("backbone", { opacity: 0.35 });
+    }
+    function addRibbon(comp){ comp.addRepresentation("ribbon", { scale: 0.8, color: "sstruc" }); }
+    function addThreadOnly(comp){ comp.addRepresentation("backbone", { opacity: 0.85 }); }
+
+    const domainColors = ["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4",
+                          "#46f0f0","#f032e6","#bcf60c","#fabebe","#008080",
+                          "#e6beff","#9A6324","#fffac8","#800000","#aaffc3"];
+
+    async function fetchDomains(uid){
+      const r = await fetch(`${API_BASE}/api/domains/${uid}`);
+      if(!r.ok) throw new Error(`Domain API ${r.status}`);
+      const j = await r.json();
+      return j.domains || [];
+    }
+
+    function renderDomainList(domains, onClick){
+      const box = document.getElementById("domainsBox");
+      if(!domains.length){ box.innerHTML = "<em>No domain-like features on UniProt.</em>"; return; }
+      box.innerHTML = "";
+      domains.forEach((d,i) => {
+        const el = document.createElement("div");
+        el.style.margin = "4px 0"; el.style.cursor = "pointer";
+        el.innerHTML = `<span style="display:inline-block;width:12px;height:12px;background:${domainColors[i%domainColors.length]};margin-right:6px;"></span>
+                        <strong>${d.description}</strong> <small>(${d.type})</small> — ${d.start}-${d.end}`;
+        el.onclick = () => onClick(d,i);
+        box.appendChild(el);
       });
-      // thin thread underneath (pick ONE of these)
-      //comp.addRepresentation("backbone", { opacity: 0.35 });               // option A
-      comp.addRepresentation("tube", { radiusScale: 0.15, opacity: 0.35 }); // option B
     }
 
-    function addRibbon(comp){
-      comp.addRepresentation("ribbon", { scale: 0.8, color: "sstruc" });
-      comp.addRepresentation("backbone", { opacity: 0.30 });
+    function addDomainOverlays(comp, domains){
+      domains.forEach((d,i) => {
+        comp.addRepresentation("cartoon", {
+          sele: `${d.start}-${d.end}`,           // UniProt numbering matches AF in most cases
+          color: domainColors[i % domainColors.length],
+          scale: 0.8, opacity: 0.95
+        });
+      });
     }
+    function zoomToDomain(comp, d){ comp.autoView(`${d.start}-${d.end}`); }
 
-    function addThreadOnly(comp){
-      comp.addRepresentation("backbone", { opacity: 0.85 });
-      // or: comp.addRepresentation("tube", { radiusScale: 0.12, opacity: 0.85 });
-    }
+    let currentStyle = "cartoon";
 
     async function loadAndShow(uniprotId, style="cartoon"){
       if(!uniprotId) return alert("Enter a UniProt ID");
@@ -50,42 +77,53 @@
       try{
         const comp = await stage.loadFile(pdbUrl);
         clearReps(comp);
-
         if(style === "cartoon") addCartoon(comp);
         else if(style === "ribbon") addRibbon(comp);
-        else if(style === "thread") addThreadOnly(comp);
+        else addThreadOnly(comp);
+
+        try{
+          const domains = await fetchDomains(uniprotId);
+          console.log("Domains:", domains);                // debug
+          addDomainOverlays(comp, domains);
+          renderDomainList(domains, (d)=>zoomToDomain(comp, d));
+        }catch(e){
+          document.getElementById("domainsBox").innerHTML =
+            `<em>Cannot load domain data (${e.message}).</em>`;
+        }
 
         comp.autoView();
       }catch(err){
-        alert("Failed to load structure (check UniProt ID or model availability): " + err);
+        alert("Failed to load structure: " + err);
       }
     }
 
     const idInput = document.getElementById("uniprotID");
-    let currentStyle = "cartoon";
+    document.getElementById("loadBtn").onclick =
+      () => loadAndShow(idInput.value.trim(), currentStyle);
 
-    document.getElementById("loadBtn").onclick = () =>
-      loadAndShow(idInput.value.trim(), currentStyle);
-
-    function setStyle(style){
-      currentStyle = style;
+    function setStyle(s){
+      currentStyle = s;
       const id = idInput.value.trim();
-      if(stage.compList.length && id) loadAndShow(id, style);
+      if(stage.compList.length && id) loadAndShow(id, s);
     }
-
-    // extras: spin / reset helpers (hook to buttons if you add them)
     function toggleSpin(){ stage.setSpin(!stage.parameters.spin); }
-    function resetView(){
-      if(stage.compList[0]) stage.compList[0].autoView();
-    }
-
+    function resetView(){ if(stage.compList[0]) stage.compList[0].autoView(); }
   </script>
+
+
 
   <div id="legend" style="margin-top:10px; font-family:sans-serif; font-size:14px;">
     <strong>Legend:</strong>
     <span style="display:inline-block; width:12px; height:12px; background-color:magenta; margin-right:4px;"></span> α-helix
     <span style="display:inline-block; width:12px; height:12px; background-color:gold; margin-left:10px; margin-right:4px;"></span> β-sheet
     <span style="display:inline-block; width:12px; height:12px; background-color:lightgray; margin-left:10px; margin-right:4px; border:1px solid #ccc;"></span> Coil/loop
+  </div>
+
+  <div id="domainsPanel" style="margin-top:12px; padding:8px; border:1px solid #ddd; width:600px;">
+    <strong>Domains (UniProt):</strong>
+    <div id="domainsBox" style="margin-top:6px; font-family:sans-serif; font-size:14px;">
+      <em>Load a structure to see domains…</em>
+    </div>
   </div>
 
 
