@@ -16,6 +16,13 @@ import requests
 from typing import List, Dict, Any
 from flask import Flask, jsonify, request
 from flask_cors import CORS
+try:
+    from gene_to_uniprot import UniProtResolver
+except ModuleNotFoundError:
+    import os, sys
+    sys.path.append(os.path.dirname(__file__)) 
+    from gene_to_uniprot import UniProtResolver
+
 
 TIMEOUT = 25
 HEADERS = {"User-Agent": "VarViz3D/0.3"}
@@ -345,6 +352,7 @@ class StructureFetcher:
 app = Flask(__name__)
 CORS(app)
 F = StructureFetcher()
+R = UniProtResolver()
 
 
 @app.get("/")
@@ -432,6 +440,16 @@ def api_rsid_pos(uniprot_id: str, rsid: str):
         return jsonify({"uniprot": uniprot_id, "rsid": rsid, "positions": positions})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
+
+@app.get("/api/resolve/<symbol>")
+def api_resolve(symbol: str):
+    try:
+        org = int(request.args.get("organism", "9606"))
+        out = R.resolve(symbol, organism=org)
+        return jsonify(out)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
 
 
 if __name__ == "__main__":

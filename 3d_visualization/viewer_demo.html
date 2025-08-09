@@ -5,10 +5,7 @@
   <title>Protein 3D Structure Viewer</title>
   <script src="https://unpkg.com/ngl@latest/dist/ngl.js"></script>
   <style>
-    :root{
-      --accent:#f6c44f; --accent2:#c9a93b;
-      --btn:#f6f6f6; --btnb:#bbb; --btntext:#222;
-    }
+    :root{ --accent:#f6c44f; --accent2:#c9a93b; --btn:#f6f6f6; --btnb:#bbb; --btntext:#222; }
     body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:16px; }
     #viewport{ width: 960px; height: 520px; border:1px solid #ccc; }
     .row{ margin:10px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
@@ -17,7 +14,7 @@
     .pill.active{ background:var(--accent); border-color:var(--accent2); }
     .ghost{ margin-left: 18px; }
 
-    /* легенда heatmap: больше воздуха */
+    /* heatmap legend with extra air */
     #legendBar{
       width:960px; height:14px; border:1px solid #ccc;
       background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000);
@@ -25,7 +22,7 @@
     }
     #legendScale{
       width:960px; display:flex; justify-content:space-between; font-size:12px;
-      margin-bottom:14px; /* зазор над 2D-графиком */
+      margin-bottom:14px;
     }
 
     #heatmapPanel{ display:none; }
@@ -44,10 +41,10 @@
 <h1 style="margin-bottom:8px;">Protein 3D Structure Viewer</h1>
 
 <div class="row">
-  <strong>UniProt ID:</strong>
-  <input id="uniprotID" value="P02144" style="width:160px;">
+  <strong>Gene / UniProt:</strong>
+  <input id="uniprotID" value="BRCA1" style="width:200px;">
   <button id="loadBtn" class="pill">Load structure</button>
-  <span class="hint">Examples: P02144, P38398, P04637…</span>
+  <span class="hint">Examples: BRCA1, P38398, P04637…</span>
 </div>
 
 <div id="viewport"></div>
@@ -67,9 +64,7 @@
   <span class="ghost"></span>
   <button id="btnSpin" class="pill">Spin</button>
 
-  <!-- rsID controls -->
-  <span class="ghost"></span>
-  <strong>rsID:</strong>
+  <span class="ghost"></span><strong>rsID:</strong>
   <input id="rsInput" placeholder="rs123456" style="width:120px;">
   <button id="rsBtn" class="pill">Highlight</button>
 
@@ -93,7 +88,6 @@
     <button id="applyTrack" class="pill">Apply heatmap</button>
   </div>
 
-  <!-- легенда heatmap с цифрами min/max -->
   <div id="legendBar"></div>
   <div id="legendScale">
     <span>Low <span id="legendMin">0</span></span>
@@ -113,15 +107,9 @@
 <!-- Secondary-structure legend -->
 <div id="ssPopover" class="popover" style="display:none;">
   <div class="pop-title">Secondary structure</div>
-  <div class="legend-item">
-    <span class="colorbox" style="background:magenta;"></span> α-helix
-  </div>
-  <div class="legend-item">
-    <span class="colorbox" style="background:gold;"></span> β-sheet
-  </div>
-  <div class="legend-item">
-    <span class="colorbox" style="background:#ddd;"></span> Coil/loop
-  </div>
+  <div class="legend-item"><span class="colorbox" style="background:magenta;"></span> α-helix</div>
+  <div class="legend-item"><span class="colorbox" style="background:gold;"></span> β-sheet</div>
+  <div class="legend-item"><span class="colorbox" style="background:#ddd;"></span> Coil/loop</div>
 </div>
 
 <script>
@@ -135,16 +123,15 @@
       : `http://${location.hostname}:5001`;
 
   let comp = null;
-  let mode = "sstruc";         // sstruc | rainbow | heat | domains
-  let style = "cartoon";       // cartoon | stick | sphere
-  let currentSchemeId = null;  // NGL custom color scheme id
-  let lastTracks = null;       // /api/tracks payload
-  let lastDomains = null;      // /api/domains payload
-  let lockedDomain = null;     // { sele, color }
+  let mode = "sstruc";   // sstruc | rainbow | heat | domains
+  let style = "cartoon"; // cartoon | stick | sphere
+  let currentSchemeId = null;
+  let lastTracks = null, lastDomains = null;
+  let lockedDomain = null;
 
   // rsID highlight
-  let highlightPos = null;     // residue number
-  let highlightRep = null;     // NGL representation
+  let highlightPos = null;
+  let highlightRep = null;
 
   const Registry = NGL.ColormakerRegistry || NGL.ColorMakerRegistry;
 
@@ -155,6 +142,7 @@
     predicted:  "#91bfdb"
   };
 
+  // ---------- helpers ----------
   function setActive(el, on){ el.classList.toggle("active", !!on); }
   function show(el, on){ el.style.display = on ? "block" : "none"; }
   function clearReps(){ if (comp) comp.removeAllRepresentations(); }
@@ -170,36 +158,47 @@
       comp.addRepresentation("spacefill", { ...common, scale: 0.4 });
     }
   }
+
   function applyBaseColoring(){
     clearReps();
-    if (mode === "rainbow"){
-      addStyleRep("residueindex");
+    if (mode === "rainbow") addStyleRep("residueindex");
+    else addStyleRep("sstruc");
+    applyHighlight3D(); // keep rs highlight
+  }
+
+  function applyDomainBase(){
+    if (!comp) return;
+    clearReps();
+    const base = "#cfcfcf";
+    if (style === "cartoon"){
+      comp.addRepresentation("cartoon",  { color: base, opacity: 0.30, aspectRatio:5, arrowSize:1.2, scale:0.7 });
+      comp.addRepresentation("backbone", { color: base, opacity: 0.40 });
+    } else if (style === "stick"){
+      comp.addRepresentation("licorice", { color: base, opacity: 0.35, multipleBond: true });
     } else {
-      addStyleRep("sstruc");
+      comp.addRepresentation("spacefill", { color: base, opacity: 0.30, scale: 0.4 });
     }
-    // вернуть подсветку rsID (если была)
     applyHighlight3D();
   }
 
   function makeBWR(values01){
     return Registry.addScheme(function(){
       this.atomColor = function(atom){
-        const v = values01[atom.resno] ?? 0.0; // normalized 0..1 per residue
+        const v = values01[atom.resno] ?? 0.0;
         if (v <= 0.5){
           const t = v / 0.5;
-          const r = Math.round(255 * t);
-          const g = Math.round(255 * t);
-          const b = 255;
-          return (r<<16)|(g<<8)|b; // blue->white
+          const r = Math.round(255 * t), g = Math.round(255 * t), b = 255;
+          return (r<<16)|(g<<8)|b;
         } else {
           const t = (v - 0.5) / 0.5;
           const r = 255, g = Math.round(255*(1-t)), b = Math.round(255*(1-t));
-          return (r<<16)|(g<<8)|b; // white->red
+          return (r<<16)|(g<<8)|b;
         }
       };
     });
   }
 
+  // ---------- backend I/O ----------
   async function fetchTracks(uid, win){
     const r = await fetch(`${API_BASE}/api/tracks/${uid}?win=${win}`);
     if (!r.ok) throw new Error(`tracks ${r.status}`);
@@ -217,8 +216,24 @@
     return lastDomains;
   }
 
+  // resolve: Gene symbol → UniProt accession (if needed)
+  function looksLikeUniProt(x){
+    const s = (x||"").trim();
+    return /^[OPQ][0-9][A-Z0-9]{3}[0-9](-\d+)?$/i.test(s) || /^[A-NR-Z][0-9]{5}(-\d+)?$/i.test(s);
+  }
+  async function resolveIfNeeded(input){
+    if (looksLikeUniProt(input)) return input;
+    const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(input)}?organism=9606`);
+    if (!r.ok) throw new Error("resolve failed");
+    const data = await r.json();
+    const acc = data?.best?.accession;
+    if (!acc) throw new Error("no accession for symbol");
+    return acc;
+  }
+
+  // ---------- heatmap ----------
   async function applyHeatmap(which){
-    const id  = document.getElementById("uniprotID").value.trim();
+    const id  = await resolveIfNeeded(document.getElementById("uniprotID").value.trim());
     const win = parseInt(document.getElementById("winSize").value||"15",10);
     if (!lastTracks || lastTracks.uniprot !== id || lastTracks.window !== win){
       await fetchTracks(id, win);
@@ -234,14 +249,12 @@
     addStyleRep(currentSchemeId);
     if (stage.viewer?.requestRender) stage.viewer.requestRender();
 
-    // числовые подписи min/max по текущему массиву
     const v = (arr || []).slice(1);
     const vmin = v.length ? Math.min(...v) : 0;
     const vmax = v.length ? Math.max(...v) : 1;
     document.getElementById("legendMin").textContent = vmin.toFixed(2);
     document.getElementById("legendMax").textContent = vmax.toFixed(2);
 
-    // вернуть подсветку rsID поверх теплокарты
     applyHighlight3D();
   }
 
@@ -252,17 +265,14 @@
     const W = canvas.width, H = canvas.height;
     ctx.clearRect(0,0,W,H);
 
-    // максимум для шкалы
     let maxStack = 0;
     lastTracks.bins.forEach(b => {
       const s = Object.values(b.totals).reduce((a,v)=>a+v,0);
       if (s > maxStack) maxStack = s;
     });
 
-    // больше слева под ось Y
     const pad = {l:36, r:6, t:10, b:22};
     const plotW = W - pad.l - pad.r, plotH = H - pad.t - pad.b;
-
     const n = lastTracks.bins.length;
     const barW = Math.max(2, Math.floor(plotW / n) - 2);
 
@@ -271,35 +281,24 @@
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#333";
 
-    // ось Y и тики (0..maxStack)
+    // Y axis
     ctx.strokeStyle = "#aaa";
-    ctx.beginPath();
-    ctx.moveTo(pad.l-0.5, pad.t);
-    ctx.lineTo(pad.l-0.5, pad.t + plotH);
-    ctx.stroke();
-
+    ctx.beginPath(); ctx.moveTo(pad.l-0.5, pad.t); ctx.lineTo(pad.l-0.5, pad.t + plotH); ctx.stroke();
     const ticks = 4;
     for (let i=0; i<=ticks; i++){
-      const frac = i / ticks;
-      const y = pad.t + plotH * (1 - frac);
+      const frac = i / ticks, y = pad.t + plotH * (1 - frac);
       const val = Math.round(maxStack * frac);
-      ctx.beginPath();
-      ctx.moveTo(pad.l-4, y+0.5);
-      ctx.lineTo(pad.l-0.5, y+0.5);
-      ctx.stroke();
-      const label = String(val);
-      const tw = ctx.measureText(label).width;
-      ctx.fillText(label, pad.l - 8 - tw, y);
+      ctx.beginPath(); ctx.moveTo(pad.l-4, y+0.5); ctx.lineTo(pad.l-0.5, y+0.5); ctx.stroke();
+      const tw = ctx.measureText(String(val)).width;
+      ctx.fillText(String(val), pad.l - 8 - tw, y);
     }
 
-    // сами столбики
+    // bars
     lastTracks.bins.forEach((b,i)=>{
       const x0 = pad.l + i * (plotW / n);
       let y = pad.t + plotH;
-      const order = ["predicted","uncertain","benign","pathogenic"];
-      order.forEach(k=>{
-        const val = b.totals[k] || 0;
-        if (val <= 0 || maxStack <= 0) return;
+      ["predicted","uncertain","benign","pathogenic"].forEach(k=>{
+        const val = b.totals[k] || 0; if (val<=0||maxStack<=0) return;
         const h = plotH * (val / maxStack);
         ctx.fillStyle = CLASS_COLORS[k];
         ctx.fillRect(x0, y-h, barW, h);
@@ -308,17 +307,12 @@
       canvas._barIndex.push({x:x0, y:pad.t, w:barW, h:plotH, start:b.start, end:b.end, totals:b.totals});
     });
 
-    // вертикальная метка rsID (поверх баров)
+    // rsID marker (black)
     if (highlightPos && lastTracks?.length){
       const L = lastTracks.length;
       const xPos = pad.l + Math.round((highlightPos-1)/L * plotW);
-      ctx.save();
-      ctx.strokeStyle = "#000000";
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(xPos + 0.5, pad.t - 2);
-      ctx.lineTo(xPos + 0.5, pad.t + plotH + 2);
-      ctx.stroke();
+      ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(xPos+0.5, pad.t-2); ctx.lineTo(xPos+0.5, pad.t+plotH+2); ctx.stroke();
       ctx.restore();
     }
 
@@ -328,14 +322,13 @@
       const mx = ev.clientX - r.left, my = ev.clientY - r.top;
       const hit = canvas._barIndex.find(b => mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h);
       canvas.title = hit ? (
-        `${hit.start}-${hit.end}\n` +
-        `pathogenic: ${hit.totals.pathogenic|0}\n` +
-        `benign: ${hit.totals.benign|0}\n` +
-        `uncertain: ${hit.totals.uncertain|0}\n` +
+        `${hit.start}-${hit.end}\n`+
+        `pathogenic: ${hit.totals.pathogenic|0}\n`+
+        `benign: ${hit.totals.benign|0}\n`+
+        `uncertain: ${hit.totals.uncertain|0}\n`+
         `predicted: ${hit.totals.predicted|0}`
       ) : "";
     };
-    // zoom on click
     canvas.onclick = (ev)=>{
       if (!comp) return;
       const r = canvas.getBoundingClientRect();
@@ -344,32 +337,13 @@
       if (hit) comp.autoView(`${hit.start}-${hit.end}`);
     };
 
-    // мини-легенда классов
-    const yLeg = H - 10;
-    let xLeg = pad.l;
+    // mini legend
+    const yLeg = H - 10; let xLeg = pad.l;
     ["pathogenic","benign","uncertain","predicted"].forEach(k=>{
-      ctx.fillStyle = CLASS_COLORS[k];
-      ctx.fillRect(xLeg, yLeg-8, 10, 10);
-      ctx.fillStyle = "#333";
-      ctx.fillText(k, xLeg+14, yLeg);
+      ctx.fillStyle = CLASS_COLORS[k]; ctx.fillRect(xLeg, yLeg-8, 10, 10);
+      ctx.fillStyle = "#333"; ctx.fillText(k, xLeg+14, yLeg);
       xLeg += ctx.measureText(k).width + 34;
     });
-  }
-
-  function applyDomainBase(){
-    if (!comp) return;
-    clearReps();
-    const base = "#cfcfcf"; // светло-серый
-    if (style === "cartoon"){
-      comp.addRepresentation("cartoon",  { color: base, opacity: 0.30, aspectRatio:5, arrowSize:1.2, scale:0.7 });
-      comp.addRepresentation("backbone", { color: base, opacity: 0.40 }); // слегка видимый каркас
-    } else if (style === "stick"){
-      comp.addRepresentation("licorice", { color: base, opacity: 0.35, multipleBond: true });
-    } else { // sphere
-      comp.addRepresentation("spacefill", { color: base, opacity: 0.30, scale: 0.4 });
-    }
-    // вернуть подсветку rsID поверх серой базы
-    applyHighlight3D();
   }
 
   function drawDomainTrack(){
@@ -390,66 +364,45 @@
 
     function colorForIndex(i){
       const pal=["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4","#46f0f0","#f032e6","#bcf60c",
-                "#fabebe","#008080","#e6beff","#9A6324","#fffac8","#800000","#aaffc3","#808000"];
+                 "#fabebe","#008080","#e6beff","#9A6324","#fffac8","#800000","#aaffc3","#808000"];
       return pal[i % pal.length];
     }
 
-    // --- сами домены ---
+    // domains
     lastDomains.domains.forEach((d,i)=>{
       const x1 = pad.l + Math.round((d.start-1)/L * plotW);
       const x2 = pad.l + Math.round((d.end)/L * plotW);
       const w  = Math.max(4, x2-x1);
 
-      // packing рядов, чтобы меньше перекрытий
-      let row = 0;
-      while (rows[row] && rows[row] > x1) row++;
-      rows[row] = x2 + 6;
-
+      let row = 0; while (rows[row] && rows[row] > x1) row++; rows[row] = x2 + 6;
       const y = pad.t + row * (rowH + gap);
       const color = colorForIndex(i);
 
-      ctx.fillStyle = color;
-      ctx.globalAlpha = 0.9;
-      ctx.fillRect(x1, y, w, rowH);
-      ctx.globalAlpha = 1;
+      ctx.fillStyle = color; ctx.globalAlpha = 0.9; ctx.fillRect(x1, y, w, rowH); ctx.globalAlpha = 1;
+      ctx.strokeStyle = "#fff"; ctx.strokeRect(x1+.5, y+.5, w-1, rowH-1);
 
-      ctx.strokeStyle = "#fff";
-      ctx.strokeRect(x1+.5, y+.5, w-1, rowH-1);
-
-      canvas._domHits.push({
-        x:x1, y:y, w:w, h:rowH,
-        sele:`${d.start}-${d.end}`,
-        label:`${d.type||"Domain"}: ${d.description||""} (${d.start}-${d.end})`,
-        color
-      });
+      canvas._domHits.push({x:x1, y:y, w:w, h:rowH, sele:`${d.start}-${d.end}`,
+        label:`${d.type||"Domain"}: ${d.description||""} (${d.start}-${d.end})`, color});
     });
 
-    // --- вертикальная метка rsID (чёрная) ---
+    // rsID marker (black)
     if (highlightPos && lastDomains?.domains?.length){
       const xPos = pad.l + Math.round((highlightPos-1)/L * plotW);
-      ctx.save();
-      ctx.strokeStyle = "#000000";  // чёрный
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(xPos + 0.5, pad.t - 2);
-      ctx.lineTo(xPos + 0.5, H - pad.b + 2);
-      ctx.stroke();
+      ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
+      ctx.beginPath(); ctx.moveTo(xPos+0.5, pad.t-2); ctx.lineTo(xPos+0.5, H - pad.b + 2); ctx.stroke();
       ctx.restore();
     }
 
-    // --- hover/lock поведение ---
+    // hover/lock
     let hoverRep = null;
     canvas.onmousemove = (ev)=>{
       const r = canvas.getBoundingClientRect();
       const mx = ev.clientX - r.left, my = ev.clientY - r.top;
       const hit = canvas._domHits.find(b => mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h);
       canvas.title = hit ? hit.label : "";
-      if (!comp) return;
-      if (lockedDomain) return;
+      if (!comp || lockedDomain) return;
       if (hoverRep) { hoverRep.dispose(); hoverRep = null; }
-      if (hit){
-        hoverRep = comp.addRepresentation("cartoon", { sele: hit.sele, color: hit.color, opacity:0.95, scale:0.8 });
-      }
+      if (hit) hoverRep = comp.addRepresentation("cartoon", { sele: hit.sele, color: hit.color, opacity:0.95, scale:0.8 });
     };
     canvas.onmouseleave = ()=>{
       canvas.title = "";
@@ -462,16 +415,12 @@
         const r = canvas.getBoundingClientRect();
         const mx = event.clientX - r.left, my = event.clientY - r.top;
         const hit = canvas._domHits.find(b => mx>=b.x && mx<=b.x+b.w && my>=b.y && my<=b.y+b.h);
-        if (hit){
-          lockedDomain = { sele: hit.sele, color: hit.color };
-          comp.autoView(hit.sele);
-        }
+        if (hit){ lockedDomain = { sele: hit.sele, color: hit.color }; comp.autoView(hit.sele); }
       }
     };
   }
 
-
-  // восстановление подсветки rsID на 3D после смены режима/стиля
+  // 3D rsID highlight
   function applyHighlight3D(){
     if (!comp || !highlightPos) return;
     try { if (highlightRep) highlightRep.dispose(); } catch(e){}
@@ -481,27 +430,23 @@
   }
 
   async function highlightRsid(){
-    const id = document.getElementById("uniprotID").value.trim();
+    const idResolved = await resolveIfNeeded(document.getElementById("uniprotID").value.trim());
     const rs = document.getElementById("rsInput").value.trim();
-    if (!id || !rs) return;
+    if (!idResolved || !rs) return;
 
-    const r = await fetch(`${API_BASE}/api/rspos/${id}/${encodeURIComponent(rs)}`);
+    const r = await fetch(`${API_BASE}/api/rspos/${idResolved}/${encodeURIComponent(rs)}`);
     if (!r.ok){ alert("Failed to resolve rsID"); return; }
     const data = await r.json();
-    if (!data.positions || !data.positions.length){
-      alert("rsID not found for this UniProt entry");
-      return;
-    }
+    if (!data.positions || !data.positions.length){ alert("rsID not found for this protein"); return; }
     highlightPos = data.positions[0];
 
-    // 3D
     applyHighlight3D();
     if (comp) comp.autoView(`${highlightPos}-${highlightPos}`);
-
-    // 2D
-    drawVariantTrack();
+    drawVariantTrack(); // redraw 2D with marker
+    drawDomainTrack();
   }
 
+  // ---------- UI wiring ----------
   const btnsMode = {
     sstruc:  document.getElementById("mSStruc"),
     rainbow: document.getElementById("mRainbow"),
@@ -526,68 +471,51 @@
 
   Object.entries(btnsMode).forEach(([k,el])=>{
     el.onclick = async () => {
-      mode = k;
-      applyModeButtons();
-      if (!comp) return;
+      mode = k; applyModeButtons(); if (!comp) return;
       if (mode === "heat"){
         await applyHeatmap(document.getElementById("trackSel").value);
       } else if (mode === "domains") {
-        const id = document.getElementById("uniprotID").value.trim();
+        const id = await resolveIfNeeded(document.getElementById("uniprotID").value.trim());
         if (!lastDomains || lastDomains.uniprot !== id) await fetchDomains(id);
-        drawDomainTrack();
-        applyBaseColoring();
-        comp.addRepresentation("cartoon", { color:"white", opacity:0.25, aspectRatio:5, arrowSize:1.2, scale:0.7 });
-      } else {
-        applyBaseColoring();
-      }
+        drawDomainTrack(); applyDomainBase();
+      } else { applyBaseColoring(); }
     };
   });
 
-  Object.entries(btnsMode).forEach(([k,el])=>{
+  Object.entries(btnsStyle).forEach(([k,el])=>{
     el.onclick = async () => {
-      mode = k;
-      applyModeButtons();
-      if (!comp) return;
-      if (mode === "heat"){
-        await applyHeatmap(document.getElementById("trackSel").value);
-      } else if (mode === "domains") {
-        const id = document.getElementById("uniprotID").value.trim();
-        if (!lastDomains || lastDomains.uniprot !== id) await fetchDomains(id);
-        drawDomainTrack();
-        applyDomainBase(); // серый базовый стиль
-      } else {
-        applyBaseColoring();
-      }
+      style = k; applyStyleButtons(); if (!comp) return;
+      if (mode === "heat")      await applyHeatmap(document.getElementById("trackSel").value);
+      else if (mode === "domains") applyDomainBase();
+      else applyBaseColoring();
     };
   });
 
-
-  document.getElementById("btnSpin").onclick = () => stage.setSpin(!stage.parameters.spin);
-  document.getElementById("applyTrack").onclick = () =>
-    applyHeatmap(document.getElementById("trackSel").value);
-  document.getElementById("rsBtn").onclick = () =>
-    highlightRsid().catch(console.error);
+  document.getElementById("btnSpin").onclick  = () => stage.setSpin(!stage.parameters.spin);
+  document.getElementById("applyTrack").onclick = () => applyHeatmap(document.getElementById("trackSel").value);
+  document.getElementById("rsBtn").onclick = () => highlightRsid().catch(console.error);
 
   async function loadStructure(){
-    const id = document.getElementById("uniprotID").value.trim();
-    if (!id) return alert("Enter UniProt ID");
-    lockedDomain = null;
-    lastTracks = null;
-    lastDomains = null;
-    highlightPos = null;        // сбрасываем подсветку при загрузке нового белка
+    const raw = document.getElementById("uniprotID").value.trim();
+    if (!raw) return alert("Enter Gene symbol or UniProt ID");
+    const id = await resolveIfNeeded(raw);
+    document.getElementById("uniprotID").value = id; // show resolved accession
+
+    lockedDomain = null; lastTracks = null; lastDomains = null; highlightPos = null;
     try { if (highlightRep) highlightRep.dispose(); } catch(e){}
 
     stage.removeAllComponents();
     comp = await stage.loadFile(`https://alphafold.ebi.ac.uk/files/AF-${id}-F1-model_v4.pdb`);
-    applyBaseColoring();
     comp.autoView();
 
     if (mode === "heat")     await applyHeatmap(document.getElementById("trackSel").value);
-    if (mode === "domains") { await fetchDomains(id); drawDomainTrack(); }
+    else if (mode === "domains") { await fetchDomains(id); drawDomainTrack(); applyDomainBase(); }
+    else applyBaseColoring();
   }
 
   document.getElementById("loadBtn").onclick = () => loadStructure().catch(console.error);
 
+  // init
   applyModeButtons(); applyStyleButtons();
   loadStructure().catch(console.error);
 </script>
