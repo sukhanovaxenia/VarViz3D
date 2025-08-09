@@ -1,4 +1,5 @@
 // frontend/components/ProteinStructure3D.tsx
+import { Viewer } from 'molstar/lib/apps/viewer/app';
 import React, { useEffect, useRef } from 'react';
 import * as $3Dmol from '3dmol/build/3Dmol-min.js';
 import { Box, Paper, IconButton, Tooltip } from '@mui/material';

@@ -1,0 +1,175 @@
+
+<!DOCTYPE html>
+<html>
+<head>
+    <title>TP53 Variant Structure Viewer</title>
+    <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
+    <script src="https://3dmol.org/build/3Dmol-min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; margin: 0; padding: 20px; }
+        #container { display: flex; gap: 20px; }
+        #viewer { width: 800px; height: 600px; border: 1px solid #ccc; }
+        #controls { width: 300px; }
+        .variant-info { margin: 10px 0; padding: 10px; border: 1px solid #ddd; cursor: pointer; }
+        .pathogenic { background-color: #ffebee; }
+        .benign { background-color: #e8f5e9; }
+        .vus { background-color: #fffde7; }
+        button { margin: 5px; padding: 5px 10px; cursor: pointer; }
+        .legend { margin-top: 20px; }
+        .legend-item { display: flex; align-items: center; margin: 5px 0; }
+        .color-box { width: 20px; height: 20px; margin-right: 10px; border: 1px solid #000; }
+    </style>
+</head>
+<body>
+    <h1>TP53 Protein Structure with Variants</h1>
+    <p>Structure: AlphaFold (P04637)</p>
+    
+    <div id="container">
+        <div id="viewer"></div>
+        <div id="controls">
+            <h3>View Options</h3>
+            <button onclick="setStyle('cartoon')">Cartoon</button>
+            <button onclick="setStyle('stick')">Stick</button>
+            <button onclick="setStyle('sphere')">Sphere</button>
+            <button onclick="setStyle('surface')">Surface</button>
+            
+            <h3>Highlight</h3>
+            <button onclick="highlightVariants()">All Variants</button>
+            <button onclick="highlightNearby()">Nearby Residues</button>
+            <button onclick="resetView()">Reset</button>
+            
+            <div class="legend">
+                <h3>Legend</h3>
+                <div class="legend-item">
+                    <div class="color-box" style="background-color: #FF0000;"></div>
+                    <span>Pathogenic</span>
+                </div>
+                <div class="legend-item">
+                    <div class="color-box" style="background-color: #FFFF00;"></div>
+                    <span>VUS</span>
+                </div>
+                <div class="legend-item">
+                    <div class="color-box" style="background-color: #00FF00;"></div>
+                    <span>Benign</span>
+                </div>
+            </div>
+            
+            <h3>Variants</h3>
+            <div id="variant-list"></div>
+        </div>
+    </div>
+    
+    <script>
+        let viewer;
+        let variants = [{"chr": "17", "pos": 7577120, "ref": "G", "alt": "A", "pathogenicity": "vus", "color": "#FFFF00", "frequency": 0, "cadd": 0, "protein_position": 40, "pdb_position": 40, "chain": "A"}];
+        let structure_url = 'https://alphafold.ebi.ac.uk/files/AF-P04637-F1-model_v4.pdb';
+        let radius = 8.0;
+        
+        // Initialize viewer
+        $(document).ready(function() {
+            let element = $('#viewer');
+            let config = { backgroundColor: 'white' };
+            viewer = $3Dmol.createViewer(element, config);
+            
+            // Load structure from URL
+            jQuery.ajax(structure_url, {
+                success: function(data) {
+                    viewer.addModel(data, "pdb");
+                    viewer.setStyle({}, {cartoon: {color: 'spectrum'}});
+                    highlightVariants();
+                    viewer.zoomTo();
+                    viewer.render();
+                },
+                error: function(hdr, status, err) {
+                    console.error("Failed to load structure:", err);
+                    alert("Failed to load structure from " + structure_url);
+                }
+            });
+            
+            updateVariantList();
+        });
+        
+        function setStyle(style) {
+            viewer.setStyle({}, {[style]: {color: 'spectrum'}});
+            highlightVariants();
+            viewer.render();
+        }
+        
+        function highlightVariants() {
+            // Highlight each variant
+            variants.forEach(function(variant) {
+                if (variant.pdb_position && variant.chain) {
+                    viewer.setStyle(
+                        {chain: variant.chain, resi: variant.pdb_position},
+                        {
+                            cartoon: {color: variant.color},
+                            stick: {color: variant.color, radius: 0.3},
+                            sphere: {color: variant.color, radius: 1.0}
+                        }
+                    );
+                    
+                    viewer.addLabel(
+                        variant.ref + variant.protein_position + variant.alt,
+                        {position: {chain: variant.chain, resi: variant.pdb_position},
+                          backgroundColor: variant.color,
+                          fontColor: 'white'}
+                    );
+                }
+            });
+            
+            viewer.render();
+        }
+        
+        function highlightNearby() {
+            if (variants.length === 0) return;
+            
+            let target = variants[0];
+            if (!target.pdb_position) return;
+            
+            viewer.setStyle({}, {cartoon: {color: 'lightgray'}});
+            
+            // Highlight target
+            viewer.setStyle(
+                {chain: target.chain, resi: target.pdb_position},
+                {cartoon: {color: target.color}, sphere: {color: target.color, radius: 1.5}}
+            );
+            
+            // Highlight nearby residues
+            viewer.setStyle(
+                {chain: target.chain, within: {distance: radius, sel: {chain: target.chain, resi: target.pdb_position}}},
+                {cartoon: {color: 'orange', opacity: 0.8}, stick: {color: 'orange', radius: 0.2}}
+            );
+            
+            viewer.render();
+        }
+        
+        function resetView() {
+            viewer.setStyle({}, {cartoon: {color: 'spectrum'}});
+            viewer.zoomTo();
+            viewer.render();
+        }
+        
+        function updateVariantList() {
+            let list = $('#variant-list');
+            list.empty();
+            
+            variants.forEach(function(variant, index) {
+                let div = $('<div>')
+                    .addClass('variant-info ' + variant.pathogenicity)
+                    .html(`
+                        <strong>${variant.ref}${variant.protein_position}${variant.alt}</strong><br>
+                        Pathogenicity: ${variant.pathogenicity}<br>
+                        Frequency: ${variant.frequency ? variant.frequency.toExponential(2) : 'N/A'}<br>
+                        CADD: ${variant.cadd || 'N/A'}
+                    `)
+                    .click(function() {
+                        viewer.center({chain: variant.chain, resi: variant.pdb_position});
+                        viewer.zoom(0.8);
+                        viewer.render();
+                    });
+                list.append(div);
+            });
+        }
+    </script>
+</body>
+</html>

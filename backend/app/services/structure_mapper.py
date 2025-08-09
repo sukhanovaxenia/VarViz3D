@@ -228,6 +228,17 @@ class StructureMapper:
             logger.error(f"Error parsing structure: {e}")
             
         return mapped
+
+    async def map_variant_to_structure(gene, position):
+        # 1. Get UniProt ID
+        uniprot_resp = await fetch(f"https://rest.uniprot.org/uniprotkb/search?query=gene:{gene}")
+        uniprot_id = uniprot_resp['results'][0]['primaryAccession']
+        
+        # 2. Get PDB mapping from SIFTS
+        sifts_resp = await fetch(f"https://www.ebi.ac.uk/pdbe/api/mappings/uniprot/{uniprot_id}")
+        # Returns exact UniProt→PDB position mapping
+        
+        return sifts_resp
     
     def _find_nearby_residues(
         self, 
