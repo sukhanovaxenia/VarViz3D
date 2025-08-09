@@ -1,116 +1,161 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <meta charset="UTF-8">
+  <meta charset="UTF-8" />
   <title>3D Protein Viewer Demo</title>
   <script src="https://unpkg.com/ngl@latest/dist/ngl.js"></script>
 </head>
 <body>
   <h1>Protein 3D Structure Viewer</h1>
+
   <div>
-    <label>UniProt ID: <input type="text" id="uniprotID" placeholder="e.g. P38398"></label>
+    <label>UniProt ID:
+      <input type="text" id="uniprotID" placeholder="e.g. P38398" />
+    </label>
     <button id="loadBtn">Load Structure</button>
   </div>
-  <div id="viewport" style="width: 600px; height: 400px; border: 1px solid #ccc;"></div>
 
+  <div id="viewport" style="width: 600px; height: 400px; border: 1px solid #ccc;"></div>
 
   <script>
     const stage = new NGL.Stage("viewport", { backgroundColor: "white" });
     window.addEventListener("resize", () => stage.handleResize(), false);
 
-    const API_BASE = (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+    const API_BASE =
+      (location.hostname === "localhost" || location.hostname === "127.0.0.1")
         ? "http://localhost:5001"
         : `http://${location.hostname}:5001`;
 
-    function clearReps(comp){ comp.removeAllRepresentations(); }
-
-    function addCartoon(comp){
-      comp.addRepresentation("cartoon", { aspectRatio: 5, arrowSize: 1.2, scale: 0.7, color: "sstruc" });
-      comp.addRepresentation("backbone", { opacity: 0.35 });
-    }
-    function addRibbon(comp){ comp.addRepresentation("ribbon", { scale: 0.8, color: "sstruc" }); }
-    function addThreadOnly(comp){ comp.addRepresentation("backbone", { opacity: 0.85 }); }
-
-    const domainColors = ["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4",
-                          "#46f0f0","#f032e6","#bcf60c","#fabebe","#008080",
-                          "#e6beff","#9A6324","#fffac8","#800000","#aaffc3"];
-
-    async function fetchDomains(uid){
-      const r = await fetch(`${API_BASE}/api/domains/${uid}`);
-      if(!r.ok) throw new Error(`Domain API ${r.status}`);
-      const j = await r.json();
-      return j.domains || [];
-    }
-
-    function renderDomainList(domains, onClick){
-      const box = document.getElementById("domainsBox");
-      if(!domains.length){ box.innerHTML = "<em>No domain-like features on UniProt.</em>"; return; }
-      box.innerHTML = "";
-      domains.forEach((d,i) => {
-        const el = document.createElement("div");
-        el.style.margin = "4px 0"; el.style.cursor = "pointer";
-        el.innerHTML = `<span style="display:inline-block;width:12px;height:12px;background:${domainColors[i%domainColors.length]};margin-right:6px;"></span>
-                        <strong>${d.description}</strong> <small>(${d.type})</small> — ${d.start}-${d.end}`;
-        el.onclick = () => onClick(d,i);
-        box.appendChild(el);
-      });
-    }
-
-    function addDomainOverlays(comp, domains){
-      domains.forEach((d,i) => {
-        comp.addRepresentation("cartoon", {
-          sele: `${d.start}-${d.end}`,           // UniProt numbering matches AF in most cases
-          color: domainColors[i % domainColors.length],
-          scale: 0.8, opacity: 0.95
-        });
-      });
-    }
-    function zoomToDomain(comp, d){ comp.autoView(`${d.start}-${d.end}`); }
-
+    let currentComp = null;
     let currentStyle = "cartoon";
+    let currentId = null;
+    let currentSchemeId = null;
 
-    async function loadAndShow(uniprotId, style="cartoon"){
-      if(!uniprotId) return alert("Enter a UniProt ID");
-      const pdbUrl = `https://alphafold.ebi.ac.uk/files/AF-${uniprotId}-F1-model_v4.pdb`;
+    function clearReps(comp) { comp.removeAllRepresentations(); }
 
-      stage.removeAllComponents();
-      try{
-        const comp = await stage.loadFile(pdbUrl);
-        clearReps(comp);
-        if(style === "cartoon") addCartoon(comp);
-        else if(style === "ribbon") addRibbon(comp);
-        else addThreadOnly(comp);
+    function addCartoonBase(comp) {
+      comp.addRepresentation("cartoon", { aspectRatio: 5, arrowSize: 1.2, scale: 0.7, color: "white" });
+      comp.addRepresentation("backbone", { opacity: 0.25 });
+    }
+    function addRibbonBase(comp) {
+      comp.addRepresentation("ribbon", { scale: 0.8, color: "white" });
+      comp.addRepresentation("backbone", { opacity: 0.25 });
+    }
+    function addThreadOnly(comp) {
+      comp.addRepresentation("backbone", { opacity: 0.9, color: "white" });
+    }
 
-        try{
-          const domains = await fetchDomains(uniprotId);
-          console.log("Domains:", domains);                // debug
-          addDomainOverlays(comp, domains);
-          renderDomainList(domains, (d)=>zoomToDomain(comp, d));
-        }catch(e){
-          document.getElementById("domainsBox").innerHTML =
-            `<em>Cannot load domain data (${e.message}).</em>`;
+    // --- fetch variant frequencies from Flask API ---
+    async function fetchVariantFrequencies(uid) {
+      const r = await fetch(`${API_BASE}/api/variants/${uid}`);
+      if (!r.ok) throw new Error(`Variant API ${r.status}`);
+      const j = await r.json();
+      return j.frequencies || [];   // [{pos, freq}, ...]
+    }
+
+    // --- blue → white → red colormap, expects values in 0..1 ---
+    function makeBWRColorScheme(values01) {
+      const schemeId = NGL.ColormakerRegistry.addScheme(function () {
+        this.atomColor = function (atom) {
+          const v = values01[atom.resno] ?? 0.0; // 0..1
+          if (v <= 0.5) {                       // blue -> white
+            const t = v / 0.5;
+            const r = Math.round(255 * t);
+            const g = Math.round(255 * t);
+            const b = 255;
+            return (r << 16) | (g << 8) | b;
+          } else {                               // white -> red
+            const t = (v - 0.5) / 0.5;
+            const r = 255;
+            const g = Math.round(255 * (1 - t));
+            const b = Math.round(255 * (1 - t));
+            return (r << 16) | (g << 8) | b;
+          }
+        };
+      });
+      return schemeId;
+    }
+
+    // normalize raw {pos,freq} to array[1..L] in 0..1
+    function normalizeTo01(freqs, length) {
+      const arr = new Array(length + 1).fill(0.0); // 1-based
+      if (!freqs.length) return arr;
+      let min = Infinity, max = -Infinity;
+      for (const f of freqs) {
+        if (typeof f.freq === "number") {
+          if (f.freq < min) min = f.freq;
+          if (f.freq > max) max = f.freq;
         }
+      }
+      const denom = (max - min) || 1.0;
+      for (const f of freqs) {
+        const pos = f.pos | 0;
+        if (pos > 0 && pos < arr.length) {
+          arr[pos] = (f.freq - min) / denom;
+        }
+      }
+      return arr;
+    }
 
-        comp.autoView();
-      }catch(err){
-        alert("Failed to load structure: " + err);
+    async function applyVariantGradient(uniprotId) {
+      const data = await fetchVariantFrequencies(uniprotId);
+      const L = data.length ? Math.max(...data.map(x => x.pos || 0)) : 0;
+      const values01 = normalizeTo01(data, L);
+
+      // swap scheme
+      try { if (currentSchemeId) NGL.ColormakerRegistry.removeScheme(currentSchemeId); } catch {}
+      currentSchemeId = makeBWRColorScheme(values01);
+
+      // re-add base rep but with gradient color
+      clearReps(currentComp);
+      if (currentStyle === "cartoon") {
+        currentComp.addRepresentation("cartoon", { aspectRatio: 5, arrowSize: 1.2, scale: 0.7, color: currentSchemeId });
+        currentComp.addRepresentation("backbone", { opacity: 0.25 });
+      } else if (currentStyle === "ribbon") {
+        currentComp.addRepresentation("ribbon", { scale: 0.8, color: currentSchemeId });
+        currentComp.addRepresentation("backbone", { opacity: 0.25 });
+      } else {
+        currentComp.addRepresentation("backbone", { color: currentSchemeId, opacity: 0.9 });
       }
     }
 
-    const idInput = document.getElementById("uniprotID");
-    document.getElementById("loadBtn").onclick =
-      () => loadAndShow(idInput.value.trim(), currentStyle);
+    // --- main loader ---
+    async function loadAndShow(uniprotId, style = "cartoon") {
+      if (!uniprotId) return alert("Enter a UniProt ID");
+      currentStyle = style;
+      currentId = uniprotId;
 
-    function setStyle(s){
+      const pdbUrl = `https://alphafold.ebi.ac.uk/files/AF-${uniprotId}-F1-model_v4.pdb`;
+      stage.removeAllComponents();
+      try {
+        const comp = await stage.loadFile(pdbUrl);
+        currentComp = comp;
+
+        if (style === "cartoon") addCartoonBase(comp);
+        else if (style === "ribbon") addRibbonBase(comp);
+        else addThreadOnly(comp);
+
+        await applyVariantGradient(uniprotId);
+        comp.autoView();
+      } catch (err) {
+        alert("Failed to load structure: " + err);
+        console.error(err);
+      }
+    }
+
+    // UI
+    const idInput = document.getElementById("uniprotID");
+    document.getElementById("loadBtn").onclick = () =>
+      loadAndShow(idInput.value.trim(), currentStyle);
+
+    function setStyle(s) {
       currentStyle = s;
       const id = idInput.value.trim();
-      if(stage.compList.length && id) loadAndShow(id, s);
+      if (stage.compList.length && id) loadAndShow(id, s);
     }
     function toggleSpin(){ stage.setSpin(!stage.parameters.spin); }
-    function resetView(){ if(stage.compList[0]) stage.compList[0].autoView(); }
+    function resetView(){ if (stage.compList[0]) stage.compList[0].autoView(); }
   </script>
-
-
 
   <div id="legend" style="margin-top:10px; font-family:sans-serif; font-size:14px;">
     <strong>Legend:</strong>
@@ -126,7 +171,6 @@
     </div>
   </div>
 
-
   <div style="margin-top:8px;">
     <button onclick="setStyle('cartoon')">Cartoon (spirals + arrows)</button>
     <button onclick="setStyle('ribbon')">Ribbon</button>
@@ -135,6 +179,11 @@
     <button onclick="resetView()">Reset view</button>
   </div>
 
-
+  <div style="margin-top:8px; width:600px; font-family:sans-serif;">
+    <div style="height:12px; background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000); border:1px solid #ccc;"></div>
+    <div style="display:flex; justify-content:space-between; font-size:12px;">
+      <span>Low</span><span>Medium</span><span>High</span>
+    </div>
+  </div>
 </body>
 </html>
