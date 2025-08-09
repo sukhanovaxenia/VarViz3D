@@ -1,219 +1,419 @@
 <!DOCTYPE html>
-<html>
+<html lang="en">
 <head>
   <meta charset="UTF-8" />
-  <title>3D Protein Viewer Demo</title>
+  <title>Protein 3D Structure Viewer</title>
   <script src="https://unpkg.com/ngl@latest/dist/ngl.js"></script>
+  <style>
+    :root { --w: 960px; }
+    body { font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif; margin: 18px; }
+    #viewport { width: var(--w); height: 520px; border: 1px solid #ccc; }
+    .row { margin-top: 10px; }
+    .group { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+    .btn { padding: 6px 10px; border: 1px solid #bbb; border-radius: 8px; background: #f6f6f6; cursor: pointer; }
+    .btn.active { background: #ffd36a; border-color: #c9a93b; }
+    .btn:disabled { opacity: .55; cursor: default; }
+    .muted { color:#666; font-size:13px; }
+    .spacer { flex: 1 1 auto; }
+    #legendBar { width: var(--w); height:14px; border:1px solid #ccc;
+                 background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000); }
+    #legendScale { width: var(--w); display:flex; justify-content:space-between; font-size:12px; }
+
+    /* Domains track */
+    #domainTrack { width: var(--w); height: 120px; border:1px solid #ddd; margin-top:8px; position:relative; background:#fff; }
+    .domrect { position:absolute; height:18px; border-radius:4px; cursor:pointer; opacity:.9; box-shadow:0 1px 2px rgba(0,0,0,.15); }
+    .tooltip { position:absolute; padding:4px 6px; background:#222; color:#fff; font-size:12px; border-radius:4px; pointer-events:none; white-space:nowrap; z-index: 2; }
+
+    /* Popup legend for secondary structure */
+    #ssLegendBtn { margin-left: 6px; }
+    #ssLegend {
+      position: fixed; bottom: 22px; left: 22px;
+      background: #fff; border: 1px solid #ccc; border-radius: 10px;
+      box-shadow: 0 6px 20px rgba(0,0,0,.18);
+      padding: 10px 12px; display: none; z-index: 10; min-width: 220px;
+    }
+    #ssLegend .sw { display:inline-block; width:12px; height:12px; margin-right:6px; vertical-align:middle; }
+    #ssLegend .rowl { margin: 4px 0; }
+    #ssLegend .close { float:right; margin-left:10px; cursor:pointer; color:#666; }
+  </style>
 </head>
 <body>
+
   <h1>Protein 3D Structure Viewer</h1>
 
-  <div>
+  <!-- Load controls -->
+  <div class="row group">
     <label>UniProt ID:
-      <input type="text" id="uniprotID" placeholder="e.g. P38398" />
+      <input type="text" id="uniprotID" value="P02144" />
     </label>
-    <button id="loadBtn">Load Structure</button>
+    <button class="btn" id="loadBtn">Load structure</button>
+    <span class="muted">Examples: P02144, P38398, P04637…</span>
   </div>
 
-  <div id="viewport" style="width: 600px; height: 400px; border: 1px solid #ccc;"></div>
+  <!-- 3D canvas -->
+  <div id="viewport"></div>
 
-  <div style="margin-top:8px;">
-    <button onclick="setStyle('cartoon')">Cartoon </button>
+  <!-- MODES (exclusive) -->
+  <div class="row group" aria-label="Viewer mode">
+    <span class="muted">Mode:</span>
+    <button class="btn active" id="modeSStruc"  data-mode="sstruc"  title="Color by secondary structure">Secondary structure</button>
+    <button class="btn"         id="modeRainbow" data-mode="rainbow" title="Color by sequence order (N→C, rainbow)">Rainbow</button>
+    <button class="btn"         id="modeHeat"    data-mode="heatmap" title="Color by variant density (blue→white→red)">Variants heatmap</button>
+    <button class="btn"         id="modeDomain"  data-mode="domains" title="Show 2D domains track and highlight ranges">Domains track</button>
 
-    <button onclick="setStyle('thread')">Thin thread</button>
-    <button onclick="toggleSpin()">Spin</button>
+    <!-- Popup legend toggle (for Secondary structure) -->
 
+    <span class="spacer"></span>
+
+    <!-- STYLE (independent; mode coloring applies inside each style) -->
+    <span class="muted">Style:</span>
+    <button class="btn active" id="styleCartoon">Cartoon</button>
+    <button class="btn"         id="styleStick">Stick</button>
+    <button class="btn"         id="styleSphere">Sphere</button>
+
+    <!-- Spin, separated to the far right -->
+    <span class="spacer"></span>
+    <button class="btn" id="styleSpin" title="Toggle spinning">Spin</button>
   </div>
 
-  <div id="legend" style="margin-top:10px; font-family:sans-serif; font-size:14px;">
-    <strong>Legend:</strong>
-    <span style="display:inline-block; width:12px; height:12px; background-color:magenta; margin-right:4px;"></span> α-helix
-    <span style="display:inline-block; width:12px; height:12px; background-color:gold; margin-left:10px; margin-right:4px;"></span> β-sheet
-    <span style="display:inline-block; width:12px; height:12px; background-color:lightgray; margin-left:10px; margin-right:4px; border:1px solid #ccc;"></span> Coil/loop
-  </div>
-
-  <div style="margin:8px 0;">
-    <label>Heatmap:
-      <select id="trackSel">
-        <option value="any">All variants (density)</option>
-        <option value="path">Pathogenic variants</option>
-        <option value="pop">Population variability</option>
-      </select>
-    </label>
-    <label style="margin-left:12px;">Window:
-      <input id="winSize" type="number" min="1" max="201" step="2" value="15" style="width:60px;">
-    </label>
-    <!-- inline fallback so it always triggers even if JS wiring fails -->
-    <button id="applyTrack" onclick="applyHeatmap()">Apply heatmap</button>
-  </div>
-
-  <div style="margin-top:8px; width:600px; font-family:sans-serif;">
-    <div style="height:12px; background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000); border:1px solid #ccc;"></div>
-    <div style="display:flex; justify-content:space-between; font-size:12px;">
-      <span>Low</span><span>Medium</span><span>High</span>
+  <!-- HEATMAP PANEL (visible in 'heatmap' mode) -->
+  <div id="heatmapPanel" class="row" style="display:none;">
+    <div class="group">
+      <label>Heatmap:
+        <select id="trackSel" title="Choose variant layer">
+          <option value="any">All variants (density)</option>
+          <option value="path">Pathogenic variants</option>
+        </select>
+      </label>
+      <label>Window:
+        <input id="winSize" type="number" min="1" max="201" step="2" value="15" style="width:64px;" title="Odd window size for moving average" />
+      </label>
+      <button class="btn" id="applyTrack">Apply heatmap</button>
     </div>
+    <div id="legendBar" class="row"></div>
+    <div id="legendScale"><span>Low</span><span>Medium</span><span>High</span></div>
   </div>
 
-  <!-- Put the script LAST so elements exist -->
-  <script>
-    const stage = new NGL.Stage("viewport", { backgroundColor: "white" });
-    window.addEventListener("resize", () => stage.handleResize(), false);
+  <!-- DOMAINS PANEL (visible in 'domains' mode) -->
+  <div id="domainPanel" class="row" style="display:none;">
+    <div class="muted">Hover a block to highlight the corresponding range in 3D. Click to lock/unlock.</div>
+    <div id="domainTrack"></div>
+  </div>
 
-    const API_BASE =
-      (location.hostname === "localhost" || location.hostname === "127.0.0.1")
-        ? "http://localhost:5001"
-        : `http://${location.hostname}:5001`;
+  <!-- Secondary-structure popup legend -->
+  <div id="ssLegend" role="dialog" aria-label="Secondary structure legend">
+    <span class="close" id="ssLegendClose">✕</span>
+    <div class="rowl"><strong>Secondary structure</strong></div>
+    <div class="rowl"><span class="sw" style="background:magenta;"></span>α-helix</div>
+    <div class="rowl"><span class="sw" style="background:gold;"></span>β-sheet</div>
+    <div class="rowl"><span class="sw" style="background:#ddd; border:1px solid #ccc;"></span>Coil/loop</div>
+  </div>
 
-    let currentComp = null;
-    let currentStyle = "cartoon";
-    let currentId = null;
-    let currentSchemeId = null;
-    let lastTracks = null;
+<script>
+  // ---------- NGL setup ----------
+  const stage = new NGL.Stage("viewport", { backgroundColor: "white" });
+  window.addEventListener("resize", () => stage.handleResize(), false);
 
-    function clearReps(comp){ comp.removeAllRepresentations(); }
-    function addCartoonBase(comp){
-      comp.addRepresentation("cartoon", { aspectRatio: 5, arrowSize: 1.2, scale: 0.7, color: "white" });
-      comp.addRepresentation("backbone", { opacity: 0.25 });
-    }
-    function addRibbonBase(comp){
-      comp.addRepresentation("ribbon", { scale: 0.8, color: "white" });
-      comp.addRepresentation("backbone", { opacity: 0.25 });
-    }
-    function addThreadOnly(comp){
-      comp.addRepresentation("backbone", { opacity: 0.9, color: "white" });
-    }
+  // Auto-detect backend base (localhost for dev, host:5001 for remote preview)
+  const API_BASE =
+    (location.hostname === "localhost" || location.hostname === "127.0.0.1")
+      ? "http://localhost:5001"
+      : `http://${location.hostname}:5001`;
 
-    async function fetchTracks(uid, win){
-      const url = `${API_BASE}/api/tracks/${uid}?win=${win}`;
-      console.log("GET", url);
-      const r = await fetch(url);
-      if (!r.ok) throw new Error(`tracks API ${r.status}`);
-      const j = await r.json();
-      console.log("tracks payload:", j);
-      lastTracks = j;
-      return j;
-    }
+  // Global viewer state
+  let comp = null;                // NGL component for the loaded structure
+  let currentMode = "sstruc";     // 'sstruc' | 'rainbow' | 'heatmap' | 'domains'
+  let baseStyle   = "cartoon";    // 'cartoon' | 'stick' | 'sphere'
+  let currentSchemeId = null;     // current heatmap color scheme id
+  let lastTracks = null;          // cache of /api/tracks payload
+  let lastDomains = null;         // cache of /api/domains payload
+  let lockedDomain = null;        // { sele, color } if user locked a domain
 
-    function pickTrackArray(which, useSmooth = true){
-      const src = useSmooth ? lastTracks?.smooth : lastTracks?.raw;
-      if (!src) return null;
-      return Array.isArray(src[which]) ? src[which]
-           : Array.isArray(src.any)    ? src.any
-           : null;
-    }
+  // Handle ColorMaker registry naming differences across NGL builds
+  const Registry = NGL.ColormakerRegistry || NGL.ColorMakerRegistry;
 
-    function makeBWRColorScheme(values01){
-      const Registry = NGL.ColormakerRegistry || NGL.ColorMakerRegistry;
-      const id = Registry.addScheme(function(){
-        this.atomColor = function(atom){
-          const v = values01[atom.resno] ?? 0.0;
-          if (v <= 0.5){
-            const t = v / 0.5;
-            const r = Math.round(255 * t);
-            const g = Math.round(255 * t);
-            const b = 255;
-            return (r<<16)|(g<<8)|b;
-          } else {
-            const t = (v - 0.5) / 0.5;
-            const r = 255;
-            const g = Math.round(255*(1-t));
-            const b = Math.round(255*(1-t));
-            return (r<<16)|(g<<8)|b;
-          }
-        };
+  // ---------- Helpers ----------
+  function clearReps() { if (comp) comp.removeAllRepresentations(); }
+
+  // Returns the color parameter to use for the current mode
+  function currentColorParam() {
+    if (currentMode === "sstruc")   return "sstruc";
+    if (currentMode === "rainbow")  return "residueindex";
+    if (currentMode === "heatmap")  return currentSchemeId || "white"; // set by applyHeatmap
+    if (currentMode === "domains")  return "white";                    // faint base; domains overlay
+    return "sstruc";
+  }
+
+  // Apply the selected base style with the given color source (or from mode)
+  function applyBaseStyle() {
+    if (!comp) return;
+    const color = currentColorParam();
+
+    clearReps();
+    if (baseStyle === "stick") {
+      comp.addRepresentation("licorice", { color, multipleBond: true, radiusScale: 0.35, opacity: currentMode==="domains" ? 0.25 : 1.0 });
+    } else if (baseStyle === "sphere") {
+      comp.addRepresentation("spacefill", { color, scale: 0.35, opacity: currentMode==="domains" ? 0.25 : 1.0 });
+    } else {
+      // cartoon (default)
+      comp.addRepresentation("cartoon", {
+        color, aspectRatio: 5, arrowSize: 1.2, scale: 0.7,
+        opacity: currentMode==="domains" ? 0.25 : 1.0
       });
-      return id;
+      if (currentMode !== "domains") comp.addRepresentation("backbone", { opacity: 0.25 });
+    }
+  }
+
+  // ---------- API calls ----------
+  async function fetchTracks(uid, win) {
+    const r = await fetch(`${API_BASE}/api/tracks/${uid}?win=${win}`);
+    if (!r.ok) throw new Error(`tracks ${r.status}`);
+    lastTracks = await r.json();
+    return lastTracks;
+  }
+
+  async function fetchDomains(uid) {
+    const r = await fetch(`${API_BASE}/api/domains/${uid}`);
+    if (!r.ok) throw new Error(`domains ${r.status}`);
+    lastDomains = await r.json();
+    return lastDomains;
+  }
+
+  // ---------- Heatmap (blue→white→red) ----------
+  function makeBWR(values01) {
+    // values01 is 1-based: index == residue number; each value in 0..1
+    return Registry.addScheme(function () {
+      this.atomColor = function (atom) {
+        const v = values01[atom.resno] ?? 0.0;
+        if (v <= 0.5) {
+          const t = v / 0.5;
+          const r = Math.round(255 * t);
+          const g = Math.round(255 * t);
+          const b = 255;
+          return (r<<16)|(g<<8)|b;           // blue -> white
+        } else {
+          const t = (v - 0.5) / 0.5;
+          const r = 255, g = Math.round(255 * (1 - t)), b = Math.round(255 * (1 - t));
+          return (r<<16)|(g<<8)|b;           // white -> red
+        }
+      };
+    });
+  }
+
+  async function applyHeatmap(which) {
+    if (!comp) return;
+
+    const uid = document.getElementById("uniprotID").value.trim();
+    const win = parseInt(document.getElementById("winSize").value || "15", 10);
+
+    if (!lastTracks || lastTracks.uniprot !== uid || lastTracks.window !== win) {
+      await fetchTracks(uid, win);
+    }
+    const arr = lastTracks?.smooth?.[which] || lastTracks?.smooth?.any;
+    if (!arr || !Array.isArray(arr)) return;
+
+    if (currentSchemeId && Registry.removeScheme) {
+      try { Registry.removeScheme(currentSchemeId); } catch {}
+    }
+    currentSchemeId = makeBWR(arr);
+
+    // Re-paint base style with the new scheme
+    applyBaseStyle();
+    if (stage.viewer?.requestRender) stage.viewer.requestRender();
+  }
+
+  // ---------- Domains 2D track + hover highlight ----------
+  function colorForIndex(i) {
+    const pal = ["#e6194B","#3cb44b","#4363d8","#f58231","#911eb4","#46f0f0","#f032e6","#bcf60c",
+                 "#fabebe","#008080","#e6beff","#9A6324","#fffac8","#800000","#aaffc3","#808000"];
+    return pal[i % pal.length];
+  }
+
+  function drawDomainTrack() {
+    const box = document.getElementById("domainTrack");
+    box.innerHTML = "";
+    if (!lastDomains || !lastDomains.domains?.length || !comp) return;
+
+    const L = lastDomains.length || 1;
+    const W = box.clientWidth - 10;
+    const top = 12, rowH = 20, gap = 6;
+
+    const lanes = [];   // simple lane packing
+    let hoverRep = null;
+
+    const tip = document.createElement("div");
+    tip.className = "tooltip";
+    tip.style.display = "none";
+    box.appendChild(tip);
+
+    lastDomains.domains.forEach((d, i) => {
+      const x1 = Math.round((d.start - 1) / L * W) + 5;
+      const x2 = Math.round(d.end / L * W) + 5;
+      const w  = Math.max(4, x2 - x1);
+
+      let lane = 0;
+      while (lanes[lane] && lanes[lane] > x1) lane++;
+      lanes[lane] = x2 + 6;
+
+      const y = top + lane * (rowH + gap);
+
+      const el = document.createElement("div");
+      el.className = "domrect";
+      el.style.left = x1 + "px";
+      el.style.top  = y  + "px";
+      el.style.width = w + "px";
+      el.style.background = colorForIndex(i);
+      box.appendChild(el);
+
+      const label = `${d.type || "Domain"}: ${d.description || ""} (${d.start}-${d.end})`;
+      const sele = `${d.start}-${d.end}`;
+
+      const showTip = (ev) => {
+        tip.textContent = label;
+        tip.style.left = (ev.offsetX + 10) + "px";
+        tip.style.top  = (ev.offsetY + 10) + "px";
+        tip.style.display = "block";
+      };
+
+      el.onmouseenter = (ev) => {
+        if (lockedDomain) return;
+        showTip(ev);
+        if (hoverRep) hoverRep.dispose();
+        // Overlay with the chosen style, colored by domain
+        hoverRep = comp.addRepresentation(
+          baseStyle === "stick" ? "licorice" :
+          baseStyle === "sphere" ? "spacefill" : "cartoon",
+          {
+            sele,
+            color: colorForIndex(i),
+            opacity: 0.95,
+            scale: baseStyle === "sphere" ? 0.4 : 0.8,
+            multipleBond: baseStyle === "stick"
+          }
+        );
+        comp.autoView(sele);
+      };
+      el.onmousemove = showTip;
+      el.onmouseleave = () => {
+        tip.style.display = "none";
+        if (!lockedDomain && hoverRep) { hoverRep.dispose(); hoverRep = null; }
+      };
+      el.onclick = () => {
+        lockedDomain = lockedDomain ? null : { sele, color: colorForIndex(i) };
+        if (!lockedDomain && hoverRep) { hoverRep.dispose(); hoverRep = null; }
+      };
+    });
+
+    // Faint base under domain highlights using the chosen style
+    applyBaseStyle();
+  }
+
+  // ---------- Mode switching (exclusive) ----------
+  function setActiveModeBtn(whichId) {
+    for (const id of ["modeSStruc","modeRainbow","modeHeat","modeDomain"]) {
+      document.getElementById(id).classList.toggle("active", id === whichId);
+    }
+  }
+  function setActiveStyleBtn(whichId) {
+    for (const id of ["styleCartoon","styleStick","styleSphere"]) {
+      document.getElementById(id).classList.toggle("active", id === whichId);
+    }
+  }
+
+  async function setMode(mode) {
+    currentMode = mode;
+    setActiveModeBtn(
+      mode === "sstruc"  ? "modeSStruc"  :
+      mode === "rainbow" ? "modeRainbow" :
+      mode === "heatmap" ? "modeHeat"    : "modeDomain"
+    );
+
+    const heatmapPanel = document.getElementById("heatmapPanel");
+    const domainPanel  = document.getElementById("domainPanel");
+
+    // <-- НОВОЕ: легенда видна только в режиме sstruc
+    legend.style.display = (mode === "sstruc") ? "block" : "none";
+
+    if (!comp) {
+      heatmapPanel.style.display = (mode === "heatmap") ? "block" : "none";
+      domainPanel.style.display  = (mode === "domains") ? "block" : "none";
+      return;
     }
 
-    async function applyTrackColor(which){
-      if(!currentComp || !currentId){ console.warn("nothing loaded yet"); return; }
-      const win = parseInt(document.getElementById("winSize").value || "15", 10);
-      const useSmooth = true;
-
-      if (!lastTracks || lastTracks.uniprot !== currentId || lastTracks.window !== win) {
-        await fetchTracks(currentId, win);
-      }
-      let arr = pickTrackArray(which, useSmooth);
-      if (!arr || !arr.length){ console.warn("No array to paint"); return; }
-
-      console.log(`Painting '${which}' win=${win} values[1..12]=`, arr.slice(1,13));
-
-      const Registry = NGL.ColormakerRegistry || NGL.ColorMakerRegistry;
-      try { if (currentSchemeId && Registry.removeScheme) Registry.removeScheme(currentSchemeId); } catch {}
-      currentSchemeId = makeBWRColorScheme(arr);
-
-      clearReps(currentComp);
-      if (currentStyle === "cartoon"){
-        currentComp.addRepresentation("cartoon", { aspectRatio: 5, arrowSize: 1.2, scale: 0.7, color: currentSchemeId });
-        currentComp.addRepresentation("backbone", { opacity: 0.25 });
-      } else if (currentStyle === "ribbon"){
-        currentComp.addRepresentation("ribbon", { scale: 0.8, color: currentSchemeId });
-        currentComp.addRepresentation("backbone", { opacity: 0.25 });
-      } else {
-        currentComp.addRepresentation("backbone", { color: currentSchemeId, opacity: 0.9 });
-      }
-      if (stage.viewer && typeof stage.viewer.requestRender === "function") {
-        stage.viewer.requestRender();
-      }
+    if (mode === "sstruc" || mode === "rainbow") {
+      heatmapPanel.style.display = "none";
+      domainPanel.style.display  = "none";
+      applyBaseStyle();
+    } else if (mode === "heatmap") {
+      domainPanel.style.display  = "none";
+      heatmapPanel.style.display = "block";
+      await applyHeatmap(document.getElementById("trackSel").value);
+    } else { // domains
+      heatmapPanel.style.display = "none";
+      domainPanel.style.display  = "block";
+      const uid = document.getElementById("uniprotID").value.trim();
+      if (!lastDomains || lastDomains.uniprot !== uid) await fetchDomains(uid);
+      drawDomainTrack();
     }
+  }
 
-    async function loadAndShow(uniprotId, style="cartoon"){
-      if(!uniprotId) return alert("Enter a UniProt ID");
-      currentStyle = style;
-      currentId = uniprotId;
-      lastTracks = null;
 
-      const pdbUrl = `https://alphafold.ebi.ac.uk/files/AF-${uniprotId}-F1-model_v4.pdb`;
-      stage.removeAllComponents();
-      try{
-        console.log("Loading PDB:", pdbUrl);
-        const comp = await stage.loadFile(pdbUrl);
-        currentComp = comp;
+  // ---------- Load structure ----------
+  async function loadStructure() {
+    const id = document.getElementById("uniprotID").value.trim();
+    if (!id) return alert("Enter UniProt ID.");
 
-        if(style === "cartoon") addCartoonBase(comp);
-        else if(style === "ribbon") addRibbonBase(comp);
-        else addThreadOnly(comp);
+    lockedDomain = null;
+    lastTracks = null;
+    lastDomains = null;
 
-        document.getElementById("trackSel").value = "any";
-        await applyTrackColor("any");
-        comp.autoView();
-      }catch(err){
-        alert("Failed to load structure: " + err);
-        console.error(err);
-      }
+    stage.removeAllComponents();
+    comp = await stage.loadFile(`https://alphafold.ebi.ac.uk/files/AF-${id}-F1-model_v4.pdb`);
+    applyBaseStyle();
+    comp.autoView();
+
+    if (currentMode === "heatmap") {
+      await applyHeatmap(document.getElementById("trackSel").value);
+    } else if (currentMode === "domains") {
+      await fetchDomains(id);
+      drawDomainTrack();
     }
+  }
 
-    function setStyle(s){
-      currentStyle = s;
-      const id = document.getElementById("uniprotID").value.trim();
-      if(stage.compList.length && id){
-        loadAndShow(id, s).then(() => {
-          const which = document.getElementById("trackSel").value || "any";
-          applyTrackColor(which);
-        });
-      }
-    }
-    function toggleSpin(){ stage.setSpin(!stage.parameters.spin); }
-    function resetView(){ if(stage.compList[0]) stage.compList[0].autoView(); }
+  // ---------- Wire up UI ----------
+  document.getElementById("loadBtn").onclick = loadStructure;
 
-    // expose for inline handlers
-    window.setStyle = setStyle;
-    window.toggleSpin = toggleSpin;
-    window.resetView = resetView;
-    window.applyHeatmap = function(){
-      const which = document.getElementById("trackSel").value;
-      applyTrackColor(which);
-    };
+  // Modes
+  document.getElementById("modeSStruc").onclick  = () => setMode("sstruc");
+  document.getElementById("modeRainbow").onclick = () => setMode("rainbow");
+  document.getElementById("modeHeat").onclick    = () => setMode("heatmap");
+  document.getElementById("modeDomain").onclick  = () => setMode("domains");
 
-    // run wiring AFTER DOM is ready
-    function init(){
-      document.getElementById("loadBtn").onclick = () =>
-        loadAndShow(document.getElementById("uniprotID").value.trim(), currentStyle);
-      // also wire change events to auto-apply
-      document.getElementById("trackSel").onchange = () => window.applyHeatmap();
-      document.getElementById("winSize").onchange  = () => window.applyHeatmap();
-    }
-    document.addEventListener("DOMContentLoaded", init);
-  </script>
+  // Styles
+  document.getElementById("styleCartoon").onclick = () => { baseStyle = "cartoon"; setActiveStyleBtn("styleCartoon"); applyBaseStyle(); if (currentMode==="heatmap") applyHeatmap(document.getElementById("trackSel").value); if (currentMode==="domains") drawDomainTrack(); };
+  document.getElementById("styleStick").onclick   = () => { baseStyle = "stick";   setActiveStyleBtn("styleStick");   applyBaseStyle(); if (currentMode==="heatmap") applyHeatmap(document.getElementById("trackSel").value); if (currentMode==="domains") drawDomainTrack(); };
+  document.getElementById("styleSphere").onclick  = () => { baseStyle = "sphere";  setActiveStyleBtn("styleSphere");  applyBaseStyle(); if (currentMode==="heatmap") applyHeatmap(document.getElementById("trackSel").value); if (currentMode==="domains") drawDomainTrack(); };
+
+  // Spin
+  document.getElementById("styleSpin").onclick = () => stage.setSpin(!stage.parameters.spin);
+
+  // Heatmap panel actions
+  document.getElementById("applyTrack").onclick = () =>
+    applyHeatmap(document.getElementById("trackSel").value);
+  document.getElementById("trackSel").onchange  =
+    () => (currentMode === "heatmap") && applyHeatmap(document.getElementById("trackSel").value);
+  document.getElementById("winSize").onchange   =
+    () => (currentMode === "heatmap") && applyHeatmap(document.getElementById("trackSel").value);
+
+  // Popup legend
+  const legend = document.getElementById("ssLegend");
+  document.getElementById("ssLegendBtn").onclick   = () => { legend.style.display = (legend.style.display === "block" ? "none" : "block"); };
+  document.getElementById("ssLegendClose").onclick = () => { legend.style.display = "none"; };
+
+  // Initial load & defaults
+  setActiveStyleBtn("styleCartoon");
+  setMode("sstruc").catch(console.error);
+  loadStructure().catch(console.error);
+</script>
 </body>
 </html>

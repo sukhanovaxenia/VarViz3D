@@ -9,19 +9,19 @@ TIMEOUT = 20
 UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb"
 ALPHAFOLD_PDB = "https://alphafold.ebi.ac.uk/files/AF-{uid}-F1-model_v4.pdb"
 
-# ---------- helpers ----------
-def _minmax_norm(arr: List[float]) -> List[float]:
-    """Return 0..1 normalization (arr is 1-based; index 0 kept)."""
+# ---------------- helpers ----------------
+def _minmax01(arr: List[float]) -> List[float]:
+    """0..1 нормализация. Массив 1-based, arr[0] пустой."""
     if len(arr) <= 1:
         return arr[:]
-    v = arr[1:]  # ignore index 0 (we use 1-based residues)
+    v = arr[1:]
     vmax = max(v) if v else 0.0
     if vmax <= 0:
         return [0.0] * len(arr)
     return [0.0] + [x / vmax for x in v]
 
 def _moving_avg(arr: List[float], k: int) -> List[float]:
-    """Simple sliding window average, keeps length, works on 1-based arrays."""
+    """Обычное скользящее среднее (несмещённое), длина сохраняется."""
     if k <= 1:
         return arr[:]
     out = [0.0] * len(arr)
@@ -35,30 +35,43 @@ def _moving_avg(arr: List[float], k: int) -> List[float]:
         out[i] = s / len(q)
     return out
 
-# ---------- core ----------
+# --------------- core fetcher ---------------
 class StructureFetcher:
     def __init__(self):
         self.s = requests.Session()
-        self.s.headers.update({"User-Agent": "VarViz3D/0.1"})
+        self.s.headers.update({"User-Agent": "VarViz3D/0.2"})
 
     def _get(self, url: str):
-        return self.s.get(url, timeout=TIMEOUT)
-
-    # --- Domains from UniProt ---
-    def get_domain_info(self, uni_id: str) -> List[Dict]:
-        url = f"{UNIPROT_BASE}/{uni_id}.json"
-        r = self._get(url)
+        r = self.s.get(url, timeout=TIMEOUT)
         r.raise_for_status()
-        features = r.json().get("features", [])
+        return r
 
+    def alphafold_pdb_url(self, uni_id: str) -> str:
+        return ALPHAFOLD_PDB.format(uid=uni_id)
+
+    # ---- sequence & features from UniProt ----
+    def _uniprot_json(self, uni_id: str) -> Dict:
+        return self._get(f"{UNIPROT_BASE}/{uni_id}.json").json()
+
+    def get_sequence(self, uni_id: str) -> Dict:
+        j = self._uniprot_json(uni_id)
+        seq = j.get("sequence", {}).get("value") or ""
+        return {"uniprot": uni_id, "length": len(seq), "sequence": seq}
+
+    def get_domain_info(self, uni_id: str) -> Dict:
+        """
+        Возвращает домен-подобные фичи:
+        [{start,end,type,description}], + длину белка
+        """
+        j = self._uniprot_json(uni_id)
+        L = len(j.get("sequence", {}).get("value") or "")
         ACCEPT = {
             "Domain", "Region", "DNA binding", "Zinc finger", "Repeat",
             "Coiled coil", "Topological domain", "Transmembrane"
         }
         out: List[Dict] = []
-        for f in features:
-            ftype = f.get("type")
-            if ftype not in ACCEPT:
+        for f in j.get("features", []):
+            if f.get("type") not in ACCEPT:
                 continue
             loc = f.get("location", {})
             try:
@@ -66,34 +79,19 @@ class StructureFetcher:
                 end = int(loc["end"]["value"])
             except Exception:
                 continue
-            desc = (f.get("description") or ftype).strip()
-            out.append({"start": start, "end": end, "description": desc, "type": ftype})
-
+            desc = (f.get("description") or f.get("type") or "").strip()
+            out.append({"start": start, "end": end, "type": f.get("type"), "description": desc})
         out.sort(key=lambda x: (x["start"], x["end"]))
-        return out
+        return {"uniprot": uni_id, "length": L, "domains": out}
 
-    def alphafold_pdb_url(self, uni_id: str) -> str:
-        return ALPHAFOLD_PDB.format(uid=uni_id)
-
-    # --- Variants from UniProt (Natural variant) ---
-    def _uniprot_json(self, uni_id: str) -> Dict:
-        r = self._get(f"{UNIPROT_BASE}/{uni_id}.json")
-        r.raise_for_status()
-        return r.json()
-
-    def _seq_len(self, j: Dict) -> int:
-        return len(j.get("sequence", {}).get("value") or "")
-
+    # ---- Natural variants (UniProt) → треки ----
     def get_uniprot_variants(self, uni_id: str) -> Dict:
         """
-        Collect UniProt 'Natural variant' features.
-        Returns:
-          { "length": L, "items": [ {pos, from, to, description, pathogenic_hint}, ... ] }
+        Natural variant: собираем позиции и метки «патогенности» из описаний.
         """
         j = self._uniprot_json(uni_id)
-        L = self._seq_len(j)
+        L = len(j.get("sequence", {}).get("value") or "")
         items: List[Dict] = []
-
         for f in j.get("features", []):
             if f.get("type") != "Natural variant":
                 continue
@@ -104,43 +102,31 @@ class StructureFetcher:
                 continue
             if pos < 1 or pos > L:
                 continue
-
-            desc = (f.get("description") or "")
+            desc = (f.get("description") or "").strip()
             low = desc.lower()
             pathogenic_hint = any(k in low for k in ["pathogenic", "disease", "cancer"])
-
-            frm = f.get("wildType") or ""
-            to = f.get("alternativeSequence") or ""
-
-            items.append({
-                "pos": pos,
-                "from": frm,
-                "to": to,
-                "description": desc.strip(),
-                "pathogenic_hint": pathogenic_hint
-            })
-
+            items.append({"pos": pos, "description": desc, "pathogenic_hint": pathogenic_hint})
         return {"length": L, "items": items}
 
     def build_variant_tracks(self, uni_id: str, win: int = 15) -> Dict:
         """
-        Make per-residue arrays (1..L) for:
-          - any_count   (all variants)
-          - patho_count (pathogenic-hint subset)
-          - pop_freq    (placeholder 0..1; future: gnomAD etc.)
-        Also return normalized & smoothed versions (0..1).
+        Три массива 1-based длины L:
+          raw.any  – все варианты
+          raw.path – только с признаком «патогенные»
+          raw.pop  – заглушка (0..0), сюда позже можно подать gnomAD частоты
+        + smooth.* (скользящее среднее) и нормализация 0..1.
         """
         data = self.get_uniprot_variants(uni_id)
         L = data["length"]
         any_count   = [0.0] * (L + 1)
         patho_count = [0.0] * (L + 1)
-        pop_freq    = [0.0] * (L + 1)  # TODO: fill from population DB
+        pop_freq    = [0.0] * (L + 1)  # TODO: подать реальные частоты
 
         for v in data["items"]:
-            pos = v["pos"]
-            any_count[pos] += 1.0
+            p = v["pos"]
+            any_count[p] += 1.0
             if v["pathogenic_hint"]:
-                patho_count[pos] += 1.0
+                patho_count[p] += 1.0
 
         any_sm  = _moving_avg(any_count, win)
         path_sm = _moving_avg(patho_count, win)
@@ -151,40 +137,37 @@ class StructureFetcher:
             "length": L,
             "window": win,
             "raw": {
-                "any":  _minmax_norm(any_count),
-                "path": _minmax_norm(patho_count),
-                "pop":  _minmax_norm(pop_freq),
+                "any":  _minmax01(any_count),
+                "path": _minmax01(patho_count),
+                "pop":  _minmax01(pop_freq),
             },
             "smooth": {
-                "any":  _minmax_norm(any_sm),
-                "path": _minmax_norm(path_sm),
-                "pop":  _minmax_norm(pop_sm),
+                "any":  _minmax01(any_sm),
+                "path": _minmax01(path_sm),
+                "pop":  _minmax01(pop_sm),
             }
         }
 
-# ---- Flask API ----
+# ---------------- Flask API ----------------
 app = Flask(__name__)
 CORS(app)
 F = StructureFetcher()
 
 @app.get("/")
 def root():
-    return "VarViz3D API: /api/domains/<UniProtID>, /api/variants/<UniProtID>, /api/tracks/<UniProtID>?win=15"
+    return "VarViz3D API: /api/sequence/<id>, /api/domains/<id>, /api/tracks/<id>?win=15"
+
+@app.get("/api/sequence/<uniprot_id>")
+def api_sequence(uniprot_id: str):
+    try:
+        return jsonify(F.get_sequence(uniprot_id))
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 @app.get("/api/domains/<uniprot_id>")
 def api_domains(uniprot_id: str):
     try:
-        return jsonify({"uniprot": uniprot_id, "domains": F.get_domain_info(uniprot_id)})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
-
-# Demo endpoint with a visible sine-wave frequency, useful to test coloring
-@app.get("/api/variants/<uniprot_id>")
-def api_variants(uniprot_id: str):
-    try:
-        length = 400
-        freqs = [{"pos": pos, "freq": round((math.sin(pos/50) + 1) / 2, 3)} for pos in range(1, length+1)]
-        return jsonify({"uniprot": uniprot_id, "frequencies": freqs})
+        return jsonify(F.get_domain_info(uniprot_id))
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
