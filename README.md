@@ -4,8 +4,8 @@ Complete Genetic Variation Visualization Source
 VarViz3D is a comprehensive web platform for visualizing genetic variants in both 2D protein diagrams and 3D structures. Built for the Understanding and Representing Patterns of Genetic Variation in Human Genes hackathon challenge.
 
 **Our code devided on different blocks:**
-- 3d part with proteins locates in feature/3d-visualization branch,
-- 2D part with genes coords in yulia branch
+- 3d part with proteins locates in `feature/3d-visualization` branch,
+- 2D part with genes coords in `yulia` branch
 
 
 ## ✨ Key Features
@@ -13,9 +13,9 @@ VarViz3D is a comprehensive web platform for visualizing genetic variants in bot
 - Multi-source Variant Annotation: Integrates ClinVar, gnomAD, MyVariant.info, and more
 - 2D Protein Visualization: Interactive lollipop plots with domain annotations
 - 3D Structure Mapping: Variants mapped to PDB/AlphaFold structures
-- Literature Mining: NLP-powered extraction of variant mentions from PubMed
-- GO Impact Analysis: Assesses variant effects on gene functions
-- Real-time Analysis: WebSocket updates for long-running tasks
+- Literature Mining: Extraction of variant mentions from PubMed
+- GO Impact Analysis: Assesses variant effects on gene functions (future)
+- Real-time Analysis: WebSocket updates for long-running tasks (future)
 
 ## 🚀 Quick Start (5 Minutes)
 ### Prerequisites
@@ -24,7 +24,7 @@ VarViz3D is a comprehensive web platform for visualizing genetic variants in bot
 - Git
 - 8GB RAM minimum
 
-### One-Command Setup
+### One-Command Setup (to be updated)
 ```bash
 # Clone and start everything
 git clone https://github.com/your-team/varviz3d.git
@@ -36,7 +36,7 @@ chmod +x start.sh
 - 🌐 **Frontend**: http://localhost:3000
 - 📡 **API**: http://localhost:8000/docs
 
-## 💻 Manual Setup (If Preferred)
+## 💻 Manual Setup (If Preferred) (to be updated)
 
 ### Backend Setup
 ```bash
@@ -46,23 +46,6 @@ source venv/bin/activate  # On Windows: venv\Scripts\activate
 pip install -r requirements.txt
 python -m spacy download en_core_sci_sm
 uvicorn app.main:app --reload
-```
-### Frontend Setup
-```bash
-cd frontend
-npm install
-npm run dev
-```
-### Service Setup
-```bash
-# PostgreSQL
-docker run -d --name postgres \
-  -e POSTGRES_PASSWORD=password \
-  -p 5432:5432 postgres:14
-
-# Redis
-docker run -d --name redis \
-  -p 6379:6379 redis:7-alpine
 ```
 
 ## 📊 Demo Usage
