@@ -1,5 +1,8 @@
 # VarViz3D
 Complete Genetic Variation Visualization Source
+
+# Our code devided on diferent blocks. 3d part with proteins locates in feature/3d-visualization branch, 2D part with genes coords in yulia branch
+
 ## 🧬 Overview
 VarViz3D is a comprehensive web platform for visualizing genetic variants in both 2D protein diagrams and 3D structures. Built for the Understanding and Representing Patterns of Genetic Variation in Human Genes hackathon challenge.
 
