@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-comprehensive_variant_visualizer.py - Visualize target variant and all nearby variants
+comprehensive_variant_visualizer.py - Fixed version with domains and better visualization
 """
 
 import argparse
@@ -43,37 +43,90 @@ class ComprehensiveVariantVisualizer:
             raise ValueError(f"No UniProt ID found for {gene}")
         print(f"UniProt ID: {uniprot_id}")
         
-        # 3. Get all variants in the region
+        # 3. Get protein domains
+        print("Fetching protein domains...")
+        domains = await self.get_protein_domains(uniprot_id)
+        print(f"Found {len(domains)} domains")
+        
+        # 4. Get all variants in the region
         print(f"Fetching variants within {window_size}bp window...")
         all_variants = await self.get_nearby_variants(target_variant, window_size)
         print(f"Found {len(all_variants)} variants in region")
         
-        # 4. Annotate all variants
+        # 5. Annotate all variants
         print("Annotating all variants...")
         annotated = await self.annotate_variants(all_variants)
         
-        # 5. Add gradient colors
+        # 6. Add gradient colors
         colored_variants = self.assign_gradient_colors(annotated)
         
-        # 6. Get structure
+        # 7. Get structure
         structure_data = await self.get_best_structure(uniprot_id, prefer_alphafold)
         print(f"Structure: {structure_data['source']} - {structure_data['id']}")
         
-        # 7. Map variants to structure
+        # 8. Map variants to structure
         mapped_variants = await self.map_variants_sifts(uniprot_id, structure_data, colored_variants)
         
-        # 8. Mark target variant
+        # 9. Mark target variant clearly
         for v in mapped_variants:
             if (v['chr'] == target_variant['chr'] and 
                 v['pos'] == target_variant['pos'] and
                 v['ref'] == target_variant['ref'] and
                 v['alt'] == target_variant['alt']):
                 v['is_target'] = True
+                v['color'] = '#FF00FF'  # Magenta for target
+                v['size'] = 2.0  # Larger size
             else:
                 v['is_target'] = False
         
-        # 9. Create visualization
-        self.create_comprehensive_visualization(gene, structure_data, mapped_variants, radius)
+        # 10. Create visualization
+        self.create_comprehensive_visualization(gene, structure_data, mapped_variants, domains, radius)
+    
+    async def get_protein_domains(self, uniprot_id: str) -> List[Dict]:
+        """Fetch protein domains from UniProt"""
+        domains = []
+        
+        async with aiohttp.ClientSession() as session:
+            url = f"{self.uniprot_api}/{uniprot_id}"
+            params = {'format': 'json'}
+            
+            async with session.get(url, params=params) as resp:
+                if resp.status == 200:
+                    data = await resp.json()
+                    
+                    # Extract domains (excluding interaction regions)
+                    features = data.get('features', [])
+                    for feature in features:
+                        feature_type = feature.get('type', '')
+                        
+                        # Include only structural domains
+                        if feature_type in ['Domain', 'Repeat', 'Zinc finger', 'Motif', 'Region']:
+                            if 'interaction' not in feature.get('description', '').lower():
+                                location = feature.get('location', {})
+                                start = location.get('start', {}).get('value')
+                                end = location.get('end', {}).get('value')
+                                
+                                if start and end:
+                                    domains.append({
+                                        'name': feature.get('description', feature_type),
+                                        'type': feature_type,
+                                        'start': start,
+                                        'end': end,
+                                        'color': self.get_domain_color(feature_type)
+                                    })
+        
+        return sorted(domains, key=lambda x: x['start'])
+    
+    def get_domain_color(self, domain_type: str) -> str:
+        """Assign colors to different domain types"""
+        colors = {
+            'Domain': '#4CAF50',
+            'Repeat': '#2196F3',
+            'Zinc finger': '#FF9800',
+            'Motif': '#9C27B0',
+            'Region': '#607D8B'
+        }
+        return colors.get(domain_type, '#757575')
     
     async def get_nearby_variants(self, target_variant: Dict, window_size: int) -> List[Dict]:
         """Query MyVariant for all variants in a genomic window"""
@@ -118,7 +171,7 @@ class ComprehensiveVariantVisualizer:
                             '_myvariant_data': hit
                         })
         
-        # Add target variant if not in results
+        # Always add target variant
         target_found = False
         for v in variants:
             if (v['chr'] == target_variant['chr'] and 
@@ -336,10 +389,11 @@ class ComprehensiveVariantVisualizer:
         return mapped
     
     def create_comprehensive_visualization(self, gene: str, structure_data: Dict, 
-                                         variants: List[Dict], radius: float):
+                                         variants: List[Dict], domains: List[Dict], radius: float):
         """Create HTML with comprehensive variant visualization"""
         
         variants_js = json.dumps(variants)
+        domains_js = json.dumps(domains)
         structure_url = structure_data['url']
         
         # Generate gradient legend
@@ -353,77 +407,195 @@ class ComprehensiveVariantVisualizer:
     <script src="https://code.jquery.com/jquery-3.6.0.min.js"></script>
     <script src="https://3dmol.org/build/3Dmol-min.js"></script>
     <style>
-        body {{ font-family: Arial, sans-serif; margin: 0; padding: 20px; }}
-        #container {{ display: flex; gap: 20px; }}
-        #viewer {{ width: 800px; height: 600px; border: 1px solid #ccc; }}
-        #controls {{ width: 350px; max-height: 600px; overflow-y: auto; }}
-        .variant-info {{ margin: 5px 0; padding: 8px; border: 1px solid #ddd; cursor: pointer; font-size: 12px; }}
-        .target-variant {{ border: 3px solid #000; font-weight: bold; }}
-        button {{ margin: 5px; padding: 5px 10px; cursor: pointer; }}
+        body {{ 
+            font-family: Arial, sans-serif; 
+            margin: 0; 
+            padding: 0;
+            background-color: #f5f5f5;
+        }}
+        .header {{
+            background: white;
+            padding: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            position: relative;
+            z-index: 10;
+        }}
+        h1 {{ margin: 0 0 10px 0; }}
+        .main-container {{
+            padding: 20px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }}
+        #container {{ 
+            display: flex; 
+            gap: 20px;
+            background: white;
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        #viewer {{ 
+            width: 800px; 
+            height: 600px; 
+            border: 1px solid #ccc;
+            position: relative;
+        }}
+        #controls {{ 
+            width: 400px; 
+            max-height: 600px; 
+            overflow-y: auto;
+            padding: 0 10px;
+        }}
+        .control-section {{
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #eee;
+        }}
+        .variant-info {{ 
+            margin: 5px 0; 
+            padding: 8px; 
+            border: 1px solid #ddd; 
+            cursor: pointer; 
+            font-size: 12px;
+            border-radius: 4px;
+            transition: all 0.2s;
+        }}
+        .variant-info:hover {{
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }}
+        .target-variant {{ 
+            border: 3px solid #FF00FF !important; 
+            font-weight: bold;
+            background: #FF00FF20 !important;
+        }}
+        button {{ 
+            margin: 5px; 
+            padding: 8px 12px; 
+            cursor: pointer;
+            background: #2196F3;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            transition: background 0.2s;
+        }}
+        button:hover {{
+            background: #1976D2;
+        }}
         .legend {{ margin-top: 20px; }}
-        .legend-item {{ display: flex; align-items: center; margin: 5px 0; }}
-        .color-box {{ width: 20px; height: 20px; margin-right: 10px; border: 1px solid #000; }}
+        .legend-item {{ 
+            display: flex; 
+            align-items: center; 
+            margin: 5px 0; 
+        }}
+        .color-box {{ 
+            width: 20px; 
+            height: 20px; 
+            margin-right: 10px; 
+            border: 1px solid #000; 
+        }}
         .gradient-legend {{ margin: 10px 0; }}
-        .gradient-bar {{ height: 20px; width: 200px; border: 1px solid #000; }}
-        .stats {{ background: #f5f5f5; padding: 10px; margin: 10px 0; }}
+        .gradient-bar {{ 
+            height: 20px; 
+            width: 200px; 
+            border: 1px solid #000; 
+        }}
+        .stats {{ 
+            background: #f5f5f5; 
+            padding: 10px; 
+            margin: 10px 0;
+            border-radius: 4px;
+        }}
+        .domain-list {{
+            margin-top: 10px;
+            font-size: 12px;
+        }}
+        .domain-item {{
+            padding: 5px;
+            margin: 3px 0;
+            border-radius: 3px;
+            cursor: pointer;
+        }}
     </style>
 </head>
 <body>
-    <h1>{gene} Comprehensive Variant Structure Viewer</h1>
-    <p>Structure: {structure_data['source']} ({structure_data['id']}) | Total variants: <span id="variant-count">{len(variants)}</span></p>
+    <div class="header">
+        <h1>{gene} Comprehensive Variant Structure Viewer</h1>
+        <p>Structure: {structure_data['source']} ({structure_data['id']}) | Total variants: <span id="variant-count">{len(variants)}</span> | Domains: {len(domains)}</p>
+    </div>
     
-    <div id="container">
-        <div id="viewer"></div>
-        <div id="controls">
-            <h3>View Options</h3>
-            <button onclick="setStyle('cartoon')">Cartoon</button>
-            <button onclick="setStyle('stick')">Stick</button>
-            <button onclick="setStyle('sphere')">Sphere</button>
-            <button onclick="setStyle('surface')">Surface</button>
-            
-            <h3>Highlight</h3>
-            <button onclick="highlightAll()">All Variants</button>
-            <button onclick="highlightPathogenic()">Pathogenic Only</button>
-            <button onclick="highlightRare()">Rare Variants (AF<0.1%)</button>
-            <button onclick="highlightTarget()">Target Variant</button>
-            <button onclick="resetView()">Reset</button>
-            
-            <div class="stats">
-                <h4>Variant Statistics</h4>
-                <div id="stats-content"></div>
-            </div>
-            
-            <div class="legend">
-                <h3>Legend</h3>
-                <h4>Pathogenicity</h4>
-                <div class="legend-item">
-                    <div class="color-box" style="background-color: #FF0000;"></div>
-                    <span>Pathogenic</span>
-                </div>
-                <div class="legend-item">
-                    <div class="color-box" style="background-color: #FFFF00;"></div>
-                    <span>VUS</span>
-                </div>
-                <div class="legend-item">
-                    <div class="color-box" style="background-color: #00FF00;"></div>
-                    <span>Benign</span>
+    <div class="main-container">
+        <div id="container">
+            <div id="viewer"></div>
+            <div id="controls">
+                <div class="control-section">
+                    <h3>Structure View</h3>
+                    <button onclick="setStyle('cartoon')">Cartoon</button>
+                    <button onclick="setStyle('stick')">Stick</button>
+                    <button onclick="setStyle('sphere')">Sphere</button>
+                    <button onclick="setStyle('surface')">Surface</button>
+                    <br>
+                    <button onclick="colorBySecondary()">Color by Secondary Structure</button>
+                    <button onclick="colorByDomains()">Color by Domains</button>
                 </div>
                 
-                <h4>Frequency Gradient</h4>
-                {gradient_legend}
+                <div class="control-section">
+                    <h3>Variant Highlights</h3>
+                    <button onclick="highlightTarget()" style="background: #FF00FF;">TARGET VARIANT</button>
+                    <button onclick="highlightAll()">All Variants</button>
+                    <button onclick="highlightPathogenic()">Pathogenic Only</button>
+                    <button onclick="highlightRare()">Rare (AF<0.1%)</button>
+                    <button onclick="resetView()">Reset View</button>
+                </div>
                 
-                <h4>Size = CADD Score</h4>
-                <p style="font-size: 12px;">Larger = Higher CADD</p>
+                <div class="control-section">
+                    <h3>Protein Domains</h3>
+                    <div class="domain-list" id="domain-list"></div>
+                </div>
+                
+                <div class="stats">
+                    <h4>Variant Statistics</h4>
+                    <div id="stats-content"></div>
+                </div>
+                
+                <div class="legend">
+                    <h3>Legend</h3>
+                    <h4>Pathogenicity</h4>
+                    <div class="legend-item">
+                        <div class="color-box" style="background-color: #FF00FF;"></div>
+                        <span><strong>TARGET VARIANT</strong></span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="color-box" style="background-color: #FF0000;"></div>
+                        <span>Pathogenic</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="color-box" style="background-color: #FFFF00;"></div>
+                        <span>VUS</span>
+                    </div>
+                    <div class="legend-item">
+                        <div class="color-box" style="background-color: #00FF00;"></div>
+                        <span>Benign</span>
+                    </div>
+                    
+                    <h4>Frequency Gradient</h4>
+                    {gradient_legend}
+                    
+                    <h4>Size = CADD Score</h4>
+                    <p style="font-size: 12px;">Larger = Higher CADD</p>
+                </div>
+                
+                <div class="control-section">
+                    <h3>All Variants ({len(variants)})</h3>
+                    <div id="variant-list"></div>
+                </div>
             </div>
-            
-            <h3>All Variants ({len(variants)})</h3>
-            <div id="variant-list"></div>
         </div>
     </div>
     
     <script>
         let viewer;
         let variants = {variants_js};
+        let domains = {domains_js};
         let structure_url = '{structure_url}';
         let radius = {radius};
         
@@ -435,10 +607,12 @@ class ComprehensiveVariantVisualizer:
                 benign: 0,
                 vus: 0,
                 rare: 0,
-                common: 0
+                common: 0,
+                target: 0
             }};
             
             variants.forEach(v => {{
+                if (v.is_target) stats.target++;
                 if (v.pathogenicity === 'pathogenic') stats.pathogenic++;
                 else if (v.pathogenicity === 'benign') stats.benign++;
                 else stats.vus++;
@@ -460,8 +634,8 @@ class ComprehensiveVariantVisualizer:
             jQuery.ajax(structure_url, {{
                 success: function(data) {{
                     viewer.addModel(data, "pdb");
-                    viewer.setStyle({{}}, {{cartoon: {{color: 'lightgray', opacity: 0.7}}}});
-                    highlightAll();
+                    colorBySecondary();  // Default to secondary structure coloring
+                    highlightTarget();    // Show target by default
                     viewer.zoomTo();
                     viewer.render();
                 }},
@@ -473,39 +647,112 @@ class ComprehensiveVariantVisualizer:
             
             updateVariantList();
             updateStats();
+            updateDomainList();
         }});
         
         function setStyle(style) {{
-            viewer.setStyle({{}}, {{[style]: {{color: 'lightgray', opacity: 0.7}}}});
+            viewer.setStyle({{}}, {{[style]: {{}}}});
+            colorBySecondary();
             highlightAll();
             viewer.render();
         }}
         
-        function highlightAll() {{
-            // Reset base structure
+        function colorBySecondary() {{
+            // Color by secondary structure
+            viewer.setStyle({{}}, {{
+                cartoon: {{
+                    color: 'secondary',
+                    opacity: 0.9
+                }}
+            }});
+            viewer.render();
+        }}
+        
+        function colorByDomains() {{
+            // Base gray color
             viewer.setStyle({{}}, {{cartoon: {{color: 'lightgray', opacity: 0.7}}}});
             
-            // Highlight all variants
+            // Color each domain
+            domains.forEach(function(domain) {{
+                for (let i = domain.start; i <= domain.end; i++) {{
+                    viewer.setStyle(
+                        {{resi: i}},
+                        {{cartoon: {{color: domain.color, opacity: 0.9}}}}
+                    );
+                }}
+            }});
+            
+            viewer.render();
+        }}
+        
+        function highlightTarget() {{
+            // First set base structure
+            colorBySecondary();
+            
+            let target = variants.find(v => v.is_target);
+            if (target && target.pdb_position) {{
+                // Highlight target with large magenta sphere
+                viewer.addStyle(
+                    {{chain: target.chain, resi: target.pdb_position}},
+                    {{
+                        sphere: {{color: '#FF00FF', radius: 2.5}},
+                        cartoon: {{color: '#FF00FF', thickness: 1.5}}
+                    }}
+                );
+                
+                // Show residues within radius
+                viewer.addStyle(
+                    {{
+                        within: {{distance: radius, sel: {{chain: target.chain, resi: target.pdb_position}}}}
+                    }},
+                    {{
+                        stick: {{color: 'orange', radius: 0.15, opacity: 0.7}}
+                    }}
+                );
+                
+                // Add prominent label
+                viewer.addLabel(
+                    "TARGET: " + target.ref + target.protein_position + target.alt,
+                    {{
+                        position: {{chain: target.chain, resi: target.pdb_position}},
+                        backgroundColor: 'magenta',
+                        fontColor: 'white',
+                        fontSize: 16,
+                        backgroundOpacity: 0.9
+                    }}
+                );
+                
+                viewer.center({{chain: target.chain, resi: target.pdb_position}});
+                viewer.zoom(0.8);
+            }}
+            
+            viewer.render();
+        }}
+        
+        function highlightAll() {{
+            // Keep secondary structure coloring
+            colorBySecondary();
+            
+            // Add all variants as spheres
             variants.forEach(function(variant) {{
                 if (variant.pdb_position && variant.chain) {{
                     let size = variant.size || 1.0;
+                    if (variant.is_target) size = 2.5;
                     
-                    viewer.setStyle(
+                    viewer.addStyle(
                         {{chain: variant.chain, resi: variant.pdb_position}},
                         {{
-                            cartoon: {{color: variant.color}},
-                            stick: {{color: variant.color, radius: 0.3 * size}},
                             sphere: {{color: variant.color, radius: 0.8 * size}}
                         }}
                     );
                     
-                    // Add label for target variant
+                    // Add label for target
                     if (variant.is_target) {{
                         viewer.addLabel(
-                            "TARGET: " + variant.ref + variant.protein_position + variant.alt,
+                            "TARGET",
                             {{
                                 position: {{chain: variant.chain, resi: variant.pdb_position}},
-                                backgroundColor: 'black',
+                                backgroundColor: 'magenta',
                                 fontColor: 'white',
                                 fontSize: 14
                             }}
@@ -518,14 +765,13 @@ class ComprehensiveVariantVisualizer:
         }}
         
         function highlightPathogenic() {{
-            viewer.setStyle({{}}, {{cartoon: {{color: 'lightgray', opacity: 0.7}}}});
+            colorBySecondary();
             
             variants.forEach(function(variant) {{
                 if (variant.pathogenicity === 'pathogenic' && variant.pdb_position) {{
-                    viewer.setStyle(
+                    viewer.addStyle(
                         {{chain: variant.chain, resi: variant.pdb_position}},
                         {{
-                            cartoon: {{color: variant.color}},
                             sphere: {{color: variant.color, radius: 1.2}}
                         }}
                     );
@@ -536,14 +782,13 @@ class ComprehensiveVariantVisualizer:
         }}
         
         function highlightRare() {{
-            viewer.setStyle({{}}, {{cartoon: {{color: 'lightgray', opacity: 0.7}}}});
+            colorBySecondary();
             
             variants.forEach(function(variant) {{
                 if (variant.frequency < 0.001 && variant.pdb_position) {{
-                    viewer.setStyle(
+                    viewer.addStyle(
                         {{chain: variant.chain, resi: variant.pdb_position}},
                         {{
-                            cartoon: {{color: variant.color}},
                             sphere: {{color: variant.color, radius: 1.2}}
                         }}
                     );
@@ -553,41 +798,8 @@ class ComprehensiveVariantVisualizer:
             viewer.render();
         }}
         
-        function highlightTarget() {{
-            viewer.setStyle({{}}, {{cartoon: {{color: 'lightgray', opacity: 0.7}}}});
-            
-            let target = variants.find(v => v.is_target);
-            if (target && target.pdb_position) {{
-                // Highlight target
-                viewer.setStyle(
-                    {{chain: target.chain, resi: target.pdb_position}},
-                    {{
-                        cartoon: {{color: target.color}},
-                        sphere: {{color: target.color, radius: 2.0}}
-                    }}
-                );
-                
-                // Show nearby
-                viewer.setStyle(
-                    {{
-                        chain: target.chain, 
-                        within: {{distance: radius, sel: {{chain: target.chain, resi: target.pdb_position}}}}
-                    }},
-                    {{
-                        cartoon: {{color: 'orange', opacity: 0.8}},
-                        stick: {{color: 'orange', radius: 0.2}}
-                    }}
-                );
-                
-                viewer.center({{chain: target.chain, resi: target.pdb_position}});
-                viewer.zoom(0.8);
-            }}
-            
-            viewer.render();
-        }}
-        
         function resetView() {{
-            viewer.setStyle({{}}, {{cartoon: {{color: 'spectrum'}}}});
+            colorBySecondary();
             viewer.zoomTo();
             viewer.render();
         }}
@@ -600,13 +812,14 @@ class ComprehensiveVariantVisualizer:
             let sortedVariants = [...variants].sort((a, b) => a.protein_position - b.protein_position);
             
             sortedVariants.forEach(function(variant, index) {{
+                let bgColor = variant.is_target ? '#FF00FF30' : variant.color + '30';
                 let div = $('<div>')
                     .addClass('variant-info')
                     .addClass(variant.is_target ? 'target-variant' : '')
-                    .css('background-color', variant.color + '30') // 30% opacity
+                    .css('background-color', bgColor)
                     .html(`
                         <strong>${{variant.ref}}${{variant.protein_position}}${{variant.alt}}</strong>
-                        ${{variant.is_target ? ' (TARGET)' : ''}}<br>
+                        ${{variant.is_target ? ' <span style="color: #FF00FF;">★ TARGET</span>' : ''}}<br>
                         Path: ${{variant.pathogenicity}} | 
                         AF: ${{variant.frequency ? variant.frequency.toExponential(1) : '0'}} | 
                         CADD: ${{variant.cadd ? variant.cadd.toFixed(1) : 'N/A'}}
@@ -620,9 +833,38 @@ class ComprehensiveVariantVisualizer:
             }});
         }}
         
+        function updateDomainList() {{
+            let list = $('#domain-list');
+            list.empty();
+            
+            domains.forEach(function(domain) {{
+                let div = $('<div>')
+                    .addClass('domain-item')
+                    .css('background-color', domain.color + '30')
+                    .css('border-left', '4px solid ' + domain.color)
+                    .html(`
+                        <strong>${{domain.name}}</strong><br>
+                        Residues: ${{domain.start}}-${{domain.end}} | Type: ${{domain.type}}
+                    `)
+                    .click(function() {{
+                        // Highlight this domain
+                        viewer.setStyle({{}}, {{cartoon: {{color: 'lightgray', opacity: 0.5}}}});
+                        for (let i = domain.start; i <= domain.end; i++) {{
+                            viewer.setStyle(
+                                {{resi: i}},
+                                {{cartoon: {{color: domain.color, opacity: 1.0}}}}
+                            );
+                        }}
+                        viewer.render();
+                    }});
+                list.append(div);
+            }});
+        }}
+        
         function updateStats() {{
             let stats = calculateStats();
             $('#stats-content').html(`
+                <p><strong>Target Variant: ${{stats.target}}</strong></p>
                 <p>Pathogenic: ${{stats.pathogenic}} (${{(stats.pathogenic/stats.total*100).toFixed(1)}}%)</p>
                 <p>Benign: ${{stats.benign}} (${{(stats.benign/stats.total*100).toFixed(1)}}%)</p>
                 <p>VUS: ${{stats.vus}} (${{(stats.vus/stats.total*100).toFixed(1)}}%)</p>
@@ -641,7 +883,7 @@ class ComprehensiveVariantVisualizer:
             f.write(html_content)
         
         print(f"\nComprehensive visualization saved to: {output_file}")
-        print(f"Visualizing {len(variants)} variants")
+        print(f"Visualizing {len(variants)} variants with {len(domains)} domains")
     
     def generate_gradient_legend(self) -> str:
         """Generate HTML for gradient legend"""
