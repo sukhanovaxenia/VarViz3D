@@ -20,42 +20,133 @@ VarViz3D is a comprehensive platform for genetic variant analysis that combines 
 - 8GB RAM minimum
 
 ### Installation
+#### Option 1: Automated Installation (Recommended)
 ```bash
-# Clone repository
+# Clone the repository
 git clone https://github.com/your-team/varviz3d.git
 cd varviz3d
 
-# Create virtual environment 
-conda create -n varviz3d
-conda activate varviz3d
+# Run installation script
+chmod +x install.sh
+./install.sh
+
+# Choose option 1 for pip or option 2 for conda
+# The script will create environment and install dependencies
+
+# Start all services
+./start_services.sh
+```
+
+#### Option 2: Manual Installation with pip
+```bash
+# Create virtual environment
+python3 -m venv venviz3d
+source venviz3d/bin/activate  # On Windows: venviz3d\Scripts\activate
 
 # Install dependencies
-conda install --file requirements.yml
+pip install -r requirements.txt
 
-# Or in one command
-conda create -n varviz3d --file requirements.yml
+# Start services
+./start_services.sh -e venviz3d
+```
+
+#### Option 3: Manual Installation with Conda
+```bash
+# Create conda environment
+conda env create -f environment.yml
+
+# Activate environment
+conda activate varviz3d
+
+# Start services
+./start_services.sh
 ```
 
 ### Running the Platform
+#### Start All Services
 ```bash
-# Terminal 1: Start 3D backend
-python backend_3d.py
+# Basic start (uses default ports 8000, 5001, 8501)
+./start_services.sh
 
-# Terminal 2: Start main application
-streamlit run app.py
+# With custom project directory
+./start_services.sh -d /path/to/varviz3d
 
-# Terminal 3: Start literature API (optional)
-uvicorn main:app --port 8000
+# With custom base port (will use base, base+1001, base+501)
+./start_services.sh -p 9000  # Uses 9000, 6001, 9501
 
-## Or use start_services.sh (in debug)
-chmod +x start_services.sh
-start_services.sh
+# With specific Python environment
+./start_services.sh -e /path/to/venv
 ```
 
-Access the platform at:
-- 🌐 **Main App**: http://localhost:8501
-- 🧬 **3D Viewer**: http://localhost:5001/3d/viewer
-- 📚 **Literature API**: http://localhost:8000
+#### Stop All Services
+```bash
+./stop_services.sh
+```
+
+#### Check Services Status
+```bash
+# Check if services are running
+lsof -i:8000  # Literature API
+lsof -i:5001  # 3D Backend
+lsof -i:8501  # Streamlit UI
+
+# View logs
+tail -f logs/streamlit.log
+tail -f logs/backend_3d.log
+tail -f logs/literature_api.log
+```
+
+## 🌐 Accessing the Platform
+Once started, access the services at:
+- **Main App**: http://localhost:8501
+- **3D Viewer**: http://localhost:5001/3d/viewer
+- **Literature API**: http://localhost:8000
+
+## 🧪 Testing the Installation
+
+### Quick Test
+1. Open http://localhost:8501
+2. Enter "BRCA1" in the gene symbol field
+3. Click "Set Gene"
+4. Check all three tabs load correctly
+
+### API Test
+```bash
+# Test 3D backend
+curl http://localhost:5001/api/resolve/BRCA1
+
+# Test Literature API
+curl http://localhost:8000/health
+```
+
+## 🐛 Troubleshooting
+
+### Common Issues
+| Issue | Solution |
+|-------|----------|
+| Port already in use | Run ./stop_services.sh or kill process using the port |
+| Module not found | Ensure environment is activated and packages installed |
+| gnomAD timeout | Check internet connection, API may be rate-limited, update the search |
+| 3D viewer blank | Check backend_3d.py is running on port 5001 |
+| Layout issues | Clear browser cache, use Chrome/Firefox |
+| Memory error | Increase Docker memory to 4GB minimum |
+| Services won't start | Check logs in logs/ directory for errors |
+
+### Manual Service Start
+If the script fails, start services manually:
+```bash
+# Terminal 1: Literature API
+cd varviz3d_ux/app
+uvicorn main:app --port 8000 --reload
+
+# Terminal 2: 3D Backend
+cd varviz3d_ux
+python backend_3d.py
+
+# Terminal 3: Streamlit
+cd varviz3d_ux
+streamlit run app.py
+```
 
 ## 📊 Usage Examples
 
@@ -130,6 +221,37 @@ graph LR
 - **AlphaFold**: https://alphafold.ebi.ac.uk
 - **Ensembl**: https://rest.ensembl.org
 
+### Environment Variables
+Create a `.env` file in the project root:
+```env
+# API Keys (optional)
+GNOMAD_API_KEY=your_key_here
+
+# Port Configuration
+LIT_API_PORT=8000
+BACKEND_3D_PORT=5001
+STREAMLIT_PORT=8501
+
+# Data paths
+DATA_DIR=./data
+LOG_DIR=./logs
+```
+
+### Streamlit Configuration
+Create `.streamlit/config.toml`:
+```toml
+[server]
+port = 8501
+enableCORS = false
+enableXsrfProtection = false
+
+[browser]
+gatherUsageStats = false
+
+[theme]
+primaryColor = "#f6c44f"
+```
+
 ### Performance Tuning
 ```python
 # In gnomad_viz.py
@@ -177,13 +299,25 @@ pytest tests/ -v
 
 #### Docker Deployment
 ```dockerfile
+# Dockerfile
 FROM python:3.10-slim
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install -r requirements.txt
-COPY . .
-EXPOSE 8501 5001
-CMD ["sh", "-c", "python backend_3d.py & streamlit run app.py"]
+
+COPY varviz3d_ux/ ./varviz3d_ux/
+COPY start_services.sh .
+
+EXPOSE 8000 5001 8501
+
+CMD ["./start_services.sh"]
+```
+
+Build and run:
+```bash
+docker build -t varviz3d .
+docker run -p 8000:8000 -p 5001:5001 -p 8501:8501 varviz3d
 ```
 
 #### Cloud Deployment
@@ -198,15 +332,6 @@ heroku create varviz3d
 heroku buildpacks:set heroku/python
 git push heroku main
 ```
-
-## 🐛 Troubleshooting
-
-| Issue | Solution |
-|-------|----------|
-| gnomAD timeout | Reduce gene region size or use fallback data |
-| 3D viewer blank | Check backend_3d.py is running on port 5001 |
-| Layout issues | Clear browser cache, use Chrome/Firefox |
-| Memory error | Increase Docker memory to 4GB minimum |
 
 ## 🤝 Contributing
 
@@ -229,7 +354,14 @@ black . --line-length=120
 ```
 
 ## 📄 License
-MIT License - see LICENSE file for details
+
+
+## 💡 Tips
+
+1. Performance: For large genes, increase bin size in the sidebar
+2. 3D View: Use "Domains" mode to see functional regions
+3. Export: Download variant data as CSV from Literature tab
+4. Caching: Clear browser cache if UI doesn't update
 
 ## 🙏 Acknowledgments
 - gnomAD team for variant frequency data
@@ -243,11 +375,20 @@ To contribute to VarViz3D, please, [open a pull request](https://github.com/sukh
 If you have any difficulty using VarViz3D, feel free to open an [issue](https://github.com/sukhanovaxenia/VarViz3D/issues/new). If you have general questions not specific to the exact interface, we recommend that you post on a community discussion forum such as [BioStars](https://www.biostars.org).
 
 ## 📞 Support
+- Logs: heck logs in `logs/` directory
 - Issues: [GitHub Issues](https://github.com/your-team/varviz3d/issues)
 - Discussions: [GitHub Discussions](https://github.com/your-team/varviz3d/discussions)
-- Emails: 
-  - , Yuliya Barablina
-  - , Daria Panchenko
-  - , Omad Saidov
-  - sukhanovaeniad@gmail.com, Sukhanova Xenia
-  - , Ivan Tsalkovsky
+- Emails of contributors: 
+| Name and Surname | email | Role |
+| ---------------- | -------------------- | ---------------------------------------------- |
+| Yuliya Barablina |  | 2D genomic visualization, variant annotation, risk scores fetching |
+| Daria Panchenko |  | 3D protein structure visualization, variant mapping and domain annotation |
+| Omad Saidov |  | Front-, backend deployment |
+| Xenia Sukhanova | sukhanovaeniad@gmail.com | Project consultant, basic functionality implementation |
+| Ivan Tsalkovsky |  | Implementation of literature mining for gene and/or variant |
+
+## 📚 Additioinal Resources
+- [API Documentation](http://localhost:8000/docs)
+- [Streamlit Documentation](https://docs.streamlit.io)
+- [gnomAD API Guide](https://gnomad.broadinstitute.org/api)
+- [NGL Viewer Documentation](https://nglviewer.org/ngl/api/)
