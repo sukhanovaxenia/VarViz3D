@@ -23,20 +23,49 @@ st.set_page_config(
 # Custom CSS
 st.markdown("""
 <style>
+    /* Remove all Streamlit padding/margins */
     .main .block-container {
-        max-width: 100%;
-        padding-left: 2rem;
-        padding-right: 2rem;
+        max-width: none !important;
+        padding: 0 !important;
+        margin: 0 !important;
     }
+    
+    /* Full viewport for tabs */
+    [data-testid="stVerticalBlock"] > [style*="flex-direction"] {
+        gap: 0 !important;
+    }
+    
+    /* Remove column gaps */
+    [data-testid="column"] {
+        padding: 0 !important;
+    }
+    
+    /* Full width iframe */
     iframe {
-        width: 100% !important;
-        min-height: 800px !important;
-        height: 80vh !important;
-        border: 1px solid #ddd;
-        border-radius: 8px;
+        position: relative !important;
+        width: calc(100vw - 320px) !important;  /* Account for sidebar */
+        height: 85vh !important;
+        left: 0 !important;
+        border: none !important;
     }
-    .stTabs [data-baseweb="tab-panel"] {
-        padding-top: 2rem;
+    
+    /* When sidebar collapsed */
+    section[data-testid="stSidebar"][aria-expanded="false"] ~ .main iframe {
+        width: calc(100vw - 60px) !important;
+    }
+
+    /* Force plotly full width */
+    .stPlotlyChart {
+        width: 100% !important;
+    }
+    
+    /* Remove expander padding */
+    .streamlit-expanderContent {
+        padding: 0 !important;
+    }
+    
+    div[data-testid="stExpander"] {
+        width: 100% !important;
     }
 </style>
 """, unsafe_allow_html=True)
@@ -133,114 +162,109 @@ def main():
         else:
             gene = st.session_state.gene
             
-            col1, col2, col3 = st.columns([1, 1, 2])
-            with col1:
-                st.subheader(f"Gene: {gene}")
-            with col2:
-                if st.button("Generate Full Report", type="primary"):
-                    with st.spinner("Generating comprehensive gene report..."):
+            st.subheader(f"Gene: {gene}")
+            
+            if st.button("Generate Full Report", type="primary"):
+                with st.spinner("Generating comprehensive gene report..."):
+                    try:
+                        # Get gene data
+                        gj = gnomad_viz.lookup_gene(gene)
+                        gene_info = gnomad_viz.build_gene_summary(gj)
+                        gene_info["transcripts"] = gnomad_viz.annotate_transcripts(gene_info["transcripts"])
+                        
+                        # Fetch variants with error handling
                         try:
-                            # Get gene data
-                            gj = gnomad_viz.lookup_gene(gene)
-                            gene_info = gnomad_viz.build_gene_summary(gj)
-                            gene_info["transcripts"] = gnomad_viz.annotate_transcripts(gene_info["transcripts"])
-                            
-                            # Fetch variants with error handling
-                            try:
-                                variants = gnomad_viz.fetch_gnomad_variants(
-                                    gene_info["chrom"],
-                                    gene_info["start"],
-                                    gene_info["end"],
-                                    st.session_state.genome,
-                                    st.session_state.dataset
-                                )
-                            except:
-                                # Create demo data when API fails
-                                import random
-                                num_variants = 30
-                                variants = []
-                                for i in range(num_variants):
-                                    pos = gene_info["start"] + i * ((gene_info["end"] - gene_info["start"]) // num_variants)
-                                    variants.append({
-                                        "variantId": f"{gene_info['chrom']}-{pos}-A-G",
-                                        "chrom": gene_info["chrom"],
-                                        "pos": pos,
-                                        "ref": "A",
-                                        "alt": "G",
-                                        "consequence": ["missense_variant", "synonymous_variant"][i % 2],
-                                        "genome": {"af": 0.001 * (i + 1)}
-                                    })
-                                st.info("Using demonstration data due to gnomAD connection issues")
-                            
-                            df_gnomad = gnomad_viz.variants_to_dataframe(variants)
-
-                            # Fetch ClinVar with error handling
-                            try:
-                                clinvar_variants = gnomad_viz.fetch_clinvar_variants(
-                                    gene_info["chrom"],
-                                    gene_info["start"],
-                                    gene_info["end"],
-                                    st.session_state.genome
-                                )
-                            except:
-                                clinvar_variants = []
-                                st.warning("ClinVar API timeout - no ClinVar data available")
-                            
-                            df_clinvar = gnomad_viz.clinvar_variants_to_dataframe(clinvar_variants)
-                            
-                            # Create plots
-                            pie_fig = gnomad_viz.create_pie(df_gnomad)
-                            bar_fig = gnomad_viz.create_bar_plot(df_gnomad, gene_info, st.session_state.bin_size)
-                            clinvar_fig = gnomad_viz.create_clinvar_bar_plot_like_gnomad(
-                                df_clinvar, 
-                                gene_info, 
-                                bin_size=st.session_state.bin_size,
-                                gnomad_positions=df_gnomad["pos"] if not df_gnomad.empty else None
+                            variants = gnomad_viz.fetch_gnomad_variants(
+                                gene_info["chrom"],
+                                gene_info["start"],
+                                gene_info["end"],
+                                st.session_state.genome,
+                                st.session_state.dataset
                             )
-                            gene_struct_fig = gnomad_viz.create_gene_structure_plot(gene_info)
+                        except:
+                            # Create demo data when API fails
+                            import random
+                            num_variants = 30
+                            variants = []
+                            for i in range(num_variants):
+                                pos = gene_info["start"] + i * ((gene_info["end"] - gene_info["start"]) // num_variants)
+                                variants.append({
+                                    "variantId": f"{gene_info['chrom']}-{pos}-A-G",
+                                    "chrom": gene_info["chrom"],
+                                    "pos": pos,
+                                    "ref": "A",
+                                    "alt": "G",
+                                    "consequence": ["missense_variant", "synonymous_variant"][i % 2],
+                                    "genome": {"af": 0.001 * (i + 1)}
+                                })
+                            st.info("Using demonstration data due to gnomAD connection issues")
                             
-                            # Add marker if specified
-                            if st.session_state.marker_pos > 0:
-                                for fig in [bar_fig, clinvar_fig, gene_struct_fig]:
-                                    gnomad_viz.add_marker_line(fig, st.session_state.marker_pos)
+                        df_gnomad = gnomad_viz.variants_to_dataframe(variants)
+
+                        # Fetch ClinVar with error handling
+                        try:
+                            clinvar_variants = gnomad_viz.fetch_clinvar_variants(
+                                gene_info["chrom"],
+                                gene_info["start"],
+                                gene_info["end"],
+                                st.session_state.genome
+                            )
+                        except:
+                            clinvar_variants = []
+                            st.warning("ClinVar API timeout - no ClinVar data available")
+                        
+                        df_clinvar = gnomad_viz.clinvar_variants_to_dataframe(clinvar_variants)
+                        
+                        # Create plots
+                        pie_fig = gnomad_viz.create_pie(df_gnomad)
+                        bar_fig = gnomad_viz.create_bar_plot(df_gnomad, gene_info, st.session_state.bin_size)
+                        clinvar_fig = gnomad_viz.create_clinvar_bar_plot_like_gnomad(
+                            df_clinvar, 
+                            gene_info, 
+                            bin_size=st.session_state.bin_size,
+                            gnomad_positions=df_gnomad["pos"] if not df_gnomad.empty else None
+                        )
+                        gene_struct_fig = gnomad_viz.create_gene_structure_plot(gene_info)
                             
-                            # Store results
-                            st.session_state.gene_info = gene_info
-                            st.session_state.gnomad_df = df_gnomad
-                            st.session_state.clinvar_df = df_clinvar
+                        # Add marker if specified
+                        if st.session_state.marker_pos > 0:
+                            for fig in [bar_fig, clinvar_fig, gene_struct_fig]:
+                                gnomad_viz.add_marker_line(fig, st.session_state.marker_pos)
+                        
+                        # Store results
+                        st.session_state.gene_info = gene_info
+                        st.session_state.gnomad_df = df_gnomad
+                        st.session_state.clinvar_df = df_clinvar
+                        
+                        # Display plots
+                        st.success(f"Found {len(df_gnomad)} gnomAD variants, {len(df_clinvar)} ClinVar variants")
+                        
+                        # Gene info
+                        with st.expander("Gene Information", expanded=True):
                             
-                            # Display plots
-                            st.success(f"Found {len(df_gnomad)} gnomAD variants, {len(df_clinvar)} ClinVar variants")
+                            st.markdown(f"""
+                            **Ensembl ID:** {gene_info['ensembl_gene_id']}  
+                            **Region:** {gene_info['region']}  
+                            **Assembly:** {gene_info['assembly']}  
+                            **Transcripts:** {len(gene_info['transcripts'])}
+                            """)
                             
-                            # Gene info
-                            with st.expander("Gene Information", expanded=True):
-                                col1, col2 = st.columns([1, 2])
-                                with col1:
-                                    st.markdown(f"""
-                                    **Ensembl ID:** {gene_info['ensembl_gene_id']}  
-                                    **Region:** {gene_info['region']}  
-                                    **Assembly:** {gene_info['assembly']}  
-                                    **Transcripts:** {len(gene_info['transcripts'])}
-                                    """)
-                                with col2:
-                                    st.plotly_chart(pie_fig, use_container_width=True)
-                            
-                            # Variant distributions
-                            st.subheader("Variant Distribution Analysis")
-                            st.plotly_chart(bar_fig, use_container_width=True)
-                            
-                            # ClinVar
-                            if not df_clinvar.empty:
-                                st.subheader("ClinVar Variants")
-                                st.plotly_chart(clinvar_fig, use_container_width=True)
-                            
-                            # Gene structure
-                            st.subheader("Gene Structure")
-                            st.plotly_chart(gene_struct_fig, use_container_width=True)
-                            
-                        except Exception as e:
-                            st.error(f"Error: {e}")
-                            st.info("Try refreshing the page or checking your internet connection")
+                        # Variant distributions
+                        st.subheader("Variant Distribution Analysis")
+                        st.plotly_chart(bar_fig, use_container_width=True)
+                        
+                        # ClinVar
+                        if not df_clinvar.empty:
+                            st.subheader("ClinVar Variants")
+                            st.plotly_chart(clinvar_fig, use_container_width=True)
+                        
+                        # Gene structure
+                        st.subheader("Gene Structure")
+                        st.plotly_chart(gene_struct_fig, use_container_width=True)
+                        
+                    except Exception as e:
+                        st.error(f"Error: {e}")
+                        st.info("Try refreshing the page or checking your internet connection")
     
     # Tab 2: 3D Protein Structure
     with tab2:
@@ -276,7 +300,7 @@ def main():
             
             # Embed viewer
             st.markdown("### Interactive 3D Protein Viewer")
-            st.markdown(f"Loading UniProt: {uid}")
+            st.markdown(f'<iframe src="{viewer_url}" style="width:100%;height:85vh;border:none;"></iframe>', unsafe_allow_html=True)
             
             # Check if backend is running
             if st.session_state.backend.check_status():
@@ -329,6 +353,20 @@ def main():
                     with col3:
                         rsids = [v['rsid'] for v in overview.get('variants', []) if v.get('rsid')]
                         st.metric("With rsIDs", len(rsids))
+
+                if overview.get('variants'):
+                    with st.expander("Variant Details", expanded=False):
+                        df_variants = pd.DataFrame(overview['variants'])
+                        st.dataframe(df_variants, use_container_width=True)
+                        
+                        # Download button
+                        csv = df_variants.to_csv(index=False)
+                        st.download_button(
+                            label="Download Variants CSV",
+                            data=csv,
+                            file_name=f"{gene}_variants.csv",
+                            mime="text/csv"
+                        )
 
 if __name__ == "__main__":
     main()
