@@ -1,0 +1,43 @@
+# Core dependencies
+streamlit>=1.48.0
+fastapi>=0.116.1
+uvicorn[standard]>=0.35.0
+flask>=3.1.0
+flask-cors>=6.0.1
+requests>=2.32.4
+pandas>=2.3.1
+numpy>=2.1.2
+plotly>=6.2.0
+
+# Bio packages
+biopython>=1.85
+biothings_client>=0.4.1
+myvariant==1.0.0
+pyvcf3>=1.0.3
+
+# Data processing
+lxml>=5.3.1
+pyarrow>=20.0.0
+pydantic>=2.11.7
+python-dotenv>=1.1.1
+httpx>=0.28.1
+aiohttp>=3.12.15
+
+# Visualization
+altair>=5.5.0
+pillow>=11.3.0
+pydeck>=0.9.1
+
+# Utilities
+pyyaml>=6.0.2
+python-multipart>=0.0.20
+rich>=14.1.0
+typer>=0.16.0
+email-validator>=2.2.0
+requests-cache>=1.2.1
+
+# Optional for development
+watchdog>=6.0.0
+pytest>=7.0.0
+black>=22.0.0
+flake8>=5.0.0
