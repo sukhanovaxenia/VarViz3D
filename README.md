@@ -246,8 +246,8 @@ If you have any difficulty using VarViz3D, feel free to open an [issue](https://
 - Issues: [GitHub Issues](https://github.com/your-team/varviz3d/issues)
 - Discussions: [GitHub Discussions](https://github.com/your-team/varviz3d/discussions)
 - Emails: 
-- - , Yuliya Barablina
-- - , Daria Panchenko
-- - , Omad Saidov
-- - sukhanovaeniad@gmail.com, Sukhanova Xenia
-- - , Ivan Tsalkovsky
+  - , Yuliya Barablina
+  - , Daria Panchenko
+  - , Omad Saidov
+  - sukhanovaeniad@gmail.com, Sukhanova Xenia
+  - , Ivan Tsalkovsky
