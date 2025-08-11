@@ -21,6 +21,27 @@ import plotly.express as px
 import plotly.graph_objs as go
 import requests
 
+def create_gnomad_session():
+    """Create session with proper headers for gnomAD"""
+    session = requests.Session()
+    adapter = requests.adapters.HTTPAdapter(
+        pool_connections=10,
+        pool_maxsize=10,
+        max_retries=3
+    )
+    session.mount('http://', adapter)
+    session.mount('https://', adapter)
+    session.headers.update({
+        'User-Agent': 'Mozilla/5.0 (compatible; VariantAnalysis/1.0)',
+        'Accept': 'application/json',
+        'Content-Type': 'application/json',
+        'Connection': 'keep-alive'
+    })
+    return session
+
+# Global session
+GNOMAD_SESSION = create_gnomad_session()
+
 ENSEMBL_REST = "https://rest.ensembl.org"
 HEADERS = {"Content-Type": "application/json", "Accept": "application/json"}
 GNOMAD_GRAPHQL = "https://gnomad.broadinstitute.org/api"
@@ -152,34 +173,85 @@ def fetch_gnomad_variants_with_retry(
     
     return []
 
-def fetch_gnomad_variants(
-    chrom: str,
-    start: int,
-    stop: int,
-    referenceGenome: str = "GRCh38",
-    dataset: str = "gnomad_r4",
-) -> List[Dict[str, Any]]:
-    query = """
-    query($chrom: String!, $start: Int!, $stop: Int!, $referenceGenome: ReferenceGenomeId!, $dataset: DatasetId!) {
-      region(chrom: $chrom, start: $start, stop: $stop, reference_genome: $referenceGenome) {
-        variants(dataset: $dataset) {
-          variantId chrom pos ref alt consequence genome { af }
-        }
-      }
-    }"""
-    variables = {
-        "chrom": chrom,
-        "start": int(start),
-        "stop": int(stop),
-        "referenceGenome": referenceGenome,
-        "dataset": dataset,
-    }
-    r = requests.post(GNOMAD_GRAPHQL, json={"query": query, "variables": variables}, timeout=420)
-    data = r.json()
-    if "errors" in data:
-        raise RuntimeError(f"gnomAD GraphQL error: {data['errors']}")
-    return data.get("data", {}).get("region", {}).get("variants") or []
-
+# def fetch_gnomad_variants(
+#     chrom: str,
+#     start: int,
+#     stop: int,
+#     referenceGenome: str = "GRCh38",
+#     dataset: str = "gnomad_r4",
+# ) -> List[Dict[str, Any]]:
+#     """Fetch gnomAD variants with better error handling"""
+    
+#     try:
+#         query = """
+#         query($chrom: String!, $start: Int!, $stop: Int!, $referenceGenome: ReferenceGenomeId!, $dataset: DatasetId!) {
+#           region(chrom: $chrom, start: $start, stop: $stop, reference_genome: $referenceGenome) {
+#             variants(dataset: $dataset) {
+#               variantId chrom pos ref alt consequence genome { af }
+#             }
+#           }
+#         }"""
+        
+#         variables = {
+#             "chrom": chrom,
+#             "start": int(start),
+#             "stop": int(stop),
+#             "referenceGenome": referenceGenome,
+#             "dataset": dataset,
+#         }
+        
+#         # Use session for connection pooling
+#         session = requests.Session()
+#         session.headers.update({
+#             'Connection': 'keep-alive',
+#             'Accept-Encoding': 'gzip, deflate',
+#             'Accept': 'application/json',
+#             'Content-Type': 'application/json'
+#         })
+        
+#         # Reasonable timeout (30s instead of 420s)
+#         r = session.post(
+#             GNOMAD_GRAPHQL, 
+#             json={"query": query, "variables": variables}, 
+#             timeout=30
+#         )
+        
+#         if r.status_code == 200:
+#             data = r.json()
+#             if "data" in data and data["data"]:
+#                 variants = data.get("data", {}).get("region", {}).get("variants")
+#                 if variants:
+#                     return variants
+                    
+#     except requests.exceptions.ConnectionError as e:
+#         print(f"Connection error to gnomAD: {e}")
+#     except requests.exceptions.Timeout:
+#         print("gnomAD request timed out after 30s")
+#     except Exception as e:
+#         print(f"Error fetching gnomAD data: {e}")
+    
+#     # Return demo data if API fails
+#     print("Using demonstration data due to gnomAD connection issues")
+#     import random
+    
+#     num_variants = min(50, max(10, (stop - start) // 5000))
+#     consequences = ["missense_variant", "synonymous_variant", "intron_variant", 
+#                    "splice_region_variant", "stop_gained", "frameshift_variant"]
+    
+#     mock_variants = []
+#     for i in range(num_variants):
+#         pos = start + int((stop - start) * random.random())
+#         mock_variants.append({
+#             "variantId": f"{chrom}-{pos}-A-G",
+#             "chrom": chrom,
+#             "pos": pos,
+#             "ref": random.choice(["A", "C", "G", "T"]),
+#             "alt": random.choice(["A", "C", "G", "T"]),
+#             "consequence": random.choice(consequences),
+#             "genome": {"af": random.random() * 0.01}
+#         })
+    
+#     return sorted(mock_variants, key=lambda x: x["pos"])
 
 def variants_to_dataframe(variants: List[Dict[str, Any]]) -> pd.DataFrame:
     rows = []
@@ -198,6 +270,63 @@ def variants_to_dataframe(variants: List[Dict[str, Any]]) -> pd.DataFrame:
         )
     return pd.DataFrame(rows)
 
+def fetch_gnomad_variants(
+    chrom: str,
+    start: int, 
+    stop: int,
+    referenceGenome: str = "GRCh38",
+    dataset: str = "gnomad_r4",
+) -> List[Dict[str, Any]]:
+    """Fetch real gnomAD data with proper error handling"""
+    global GNOMAD_SESSION
+    
+    query = """
+    query($chrom: String!, $start: Int!, $stop: Int!, $referenceGenome: ReferenceGenomeId!, $dataset: DatasetId!) {
+      region(chrom: $chrom, start: $start, stop: $stop, reference_genome: $referenceGenome) {
+        variants(dataset: $dataset) {
+          variantId chrom pos ref alt consequence genome { af }
+        }
+      }
+    }"""
+    
+    variables = {
+        "chrom": chrom,
+        "start": int(start),
+        "stop": int(stop),
+        "referenceGenome": referenceGenome,
+        "dataset": dataset,
+    }
+    
+    try:
+        r = GNOMAD_SESSION.post(
+            GNOMAD_GRAPHQL,
+            json={"query": query, "variables": variables},
+            timeout=(5, 30)  # (connection timeout, read timeout)
+        )
+        r.raise_for_status()
+        data = r.json()
+        
+        if "errors" in data:
+            print(f"GraphQL errors: {data['errors']}")
+            return []
+            
+        return data.get("data", {}).get("region", {}).get("variants") or []
+        
+    except requests.exceptions.RequestException as e:
+        print(f"gnomAD request failed: {e}")
+        # Try once more with fresh session
+        GNOMAD_SESSION = create_gnomad_session()
+        try:
+            r = GNOMAD_SESSION.post(
+                GNOMAD_GRAPHQL,
+                json={"query": query, "variables": variables},
+                timeout=(5, 30)
+            )
+            r.raise_for_status()
+            data = r.json()
+            return data.get("data", {}).get("region", {}).get("variants") or []
+        except:
+            return []
 
 def fetch_clinvar_variants(
     chrom: str,
@@ -205,7 +334,7 @@ def fetch_clinvar_variants(
     stop: int,
     referenceGenome: str = "GRCh38",
 ) -> List[Dict[str, Any]]:
-    """ClinVar via gnomAD region track. If empty, returns []."""
+    """ClinVar via gnomAD with better error handling"""
     query = """
     query($chrom: String!, $start: Int!, $stop: Int!, $referenceGenome: ReferenceGenomeId!) {
       region(chrom: $chrom, start: $start, stop: $stop, reference_genome: $referenceGenome) {
@@ -221,15 +350,27 @@ def fetch_clinvar_variants(
         "referenceGenome": referenceGenome,
     }
     try:
-        r = requests.post(GNOMAD_GRAPHQL, json={"query": query, "variables": variables}, timeout=420)
-        data = r.json()
-        if "errors" in data:
-            print(data)
-            return []
-        return data.get("data", {}).get("region", {}).get("clinvar_variants") or []
-    except Exception:
+        session = requests.Session()
+        session.headers.update({
+            'Connection': 'keep-alive',
+            'Accept': 'application/json',
+            'Content-Type': 'application/json'
+        })
+        
+        r = session.post(
+            GNOMAD_GRAPHQL, 
+            json={"query": query, "variables": variables}, 
+            timeout=30  # Reduced from 420
+        )
+        
+        if r.status_code == 200:
+            data = r.json()
+            if "errors" not in data:
+                return data.get("data", {}).get("region", {}).get("clinvar_variants") or []
         return []
-
+    except Exception as e:
+        print(f"ClinVar fetch error: {e}")
+        return []
 
 def clinvar_variants_to_dataframe(variants: List[Dict[str, Any]]) -> pd.DataFrame:
     rows = []
@@ -268,7 +409,6 @@ def clinvar_variants_to_dataframe(variants: List[Dict[str, Any]]) -> pd.DataFram
             }
         )
     return pd.DataFrame(rows)
-
 
 # ---------- Plot utils ----------
 MARGINS = dict(l=140, r=60, t=60, b=70)

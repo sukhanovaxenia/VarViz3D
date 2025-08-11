@@ -19,7 +19,7 @@ TIMEOUT = 25
 HEADERS = {"User-Agent": "VarViz3D/0.4"}
 UNIPROT_BASE = "https://rest.uniprot.org/uniprotkb"
 PROTEINS_VAR = "https://www.ebi.ac.uk/proteins/api/variation?size=-1&accession={uid}"
-VIEWER_HTML = '''<!DOCTYPE html>
+VIEWER_HTML = r"""<!DOCTYPE html>
 <html>
 <head>
   <meta charset="UTF-8" />
@@ -28,7 +28,13 @@ VIEWER_HTML = '''<!DOCTYPE html>
   <style>
     :root{ --accent:#f6c44f; --accent2:#c9a93b; --btn:#f6f6f6; --btnb:#bbb; --btntext:#222; }
     body{ font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; margin:16px; }
-    #viewport{ width: 960px; height: 520px; border:1px solid #ccc; }
+    #viewport{ 
+        width: calc(100% - 32px); 
+        max-width: 1200px;
+        height: 600px; 
+        border:1px solid #ccc; 
+        margin: 0 auto;
+    }
     .row{ margin:10px 0; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
     .hint{ color:#666; font-size:12px; }
     .pill{ padding:8px 12px; border:1px solid var(--btnb); border-radius:10px; background:var(--btn); cursor:pointer; }
@@ -541,7 +547,7 @@ VIEWER_HTML = '''<!DOCTYPE html>
   loadStructure().catch(console.error);
 </script>
 </body>
-</html>'''
+</html>"""
 
 # Create app
 app = Flask(__name__)

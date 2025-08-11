@@ -7,107 +7,168 @@
   <script src="https://unpkg.com/ngl@latest/dist/ngl.js"></script>
   <style>
     :root{ --accent:#f6c44f; --accent2:#c9a93b; --btn:#f6f6f6; --btnb:#bbb; --btntext:#222; }
+    * { box-sizing: border-box; }
     html,body{ height:100%; margin:0; font-family: system-ui,-apple-system,Segoe UI,Roboto,Arial,sans-serif; }
-    #viewport{
-      width:100%;
-      height:clamp(420px, 70vh, 900px);   /* responsive height */
-      border:1px solid #ccc;
-      box-sizing:border-box;
+    
+    .viewer-container {
+      max-width: 100%;
+      padding: 16px;
+      margin: 0 auto;
     }
-    .row{ margin:10px 16px; display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
-    #legendBar, #legendScale { width:100%; box-sizing:border-box; }
-    /* 2D tracks responsive */
-    #varTrack, #domainTrack { width:100%; height:140px; display:block; }
+    
+    #viewport{ 
+        width: 100%;
+        height: min(80vh, 800px);
+        border: 1px solid #ccc;
+        margin: 0 auto;
+    }
+    
+    h1 { 
+      margin: 0 0 8px 0;
+      font-size: clamp(1.2rem, 3vw, 1.8rem);
+    }
+    
+    .row{ 
+      margin:10px 0; 
+      display:flex; 
+      align-items:center; 
+      gap:8px; 
+      flex-wrap:wrap; 
+    }
+    
+    .hint{ color:#666; font-size:12px; }
+    .pill{ 
+      padding:8px 12px; 
+      border:1px solid var(--btnb); 
+      border-radius:10px; 
+      background:var(--btn); 
+      cursor:pointer;
+      white-space: nowrap;
+    }
+    .pill.active{ background:var(--accent); border-color:var(--accent2); }
+    .ghost{ margin-left: 18px; }
 
-    /* heatmap legend with extra air */
     #legendBar{
-      width:960px; height:14px; border:1px solid #ccc;
+      width:100%; 
+      max-width:960px;
+      height:14px; 
+      border:1px solid #ccc;
       background: linear-gradient(90deg, #0000FF, #FFFFFF, #FF0000);
-      margin-top:6px; margin-bottom:6px;
+      margin:6px 0;
     }
+    
     #legendScale{
-      width:960px; display:flex; justify-content:space-between; font-size:12px;
+      width:100%;
+      max-width:960px;
+      display:flex; 
+      justify-content:space-between; 
+      font-size:12px;
       margin-bottom:14px;
     }
 
     #heatmapPanel{ display:none; }
     #domainPanel{ display:none; }
-    #varTrack{ border:1px solid #ddd; }
+    
+    #varTrack, #domainTrack { 
+      border:1px solid #ddd; 
+      width: 100%;
+      max-width: 960px;
+      height: auto;
+    }
 
-    .popover{ position:absolute; top:170px; left:24px; background:#fff; border:1px solid #ddd;
-              border-radius:10px; box-shadow:0 10px 40px rgba(0,0,0,.15); padding:16px 18px; }
+    .popover{ 
+      position:fixed; 
+      top:120px; 
+      left:24px; 
+      background:#fff; 
+      border:1px solid #ddd;
+      border-radius:10px; 
+      box-shadow:0 10px 40px rgba(0,0,0,.15); 
+      padding:16px 18px;
+      z-index: 1000;
+    }
+    
     .pop-title{ font-weight:700; font-size:20px; margin-bottom:8px; }
-    .legend-item{ display:flex; align-items:center; gap:10px; margin:6px 0; font-size:20px; }
+    .legend-item{ display:flex; align-items:center; gap:10px; margin:6px 0; font-size:16px; }
     .colorbox{ width:18px; height:18px; border:1px solid #ccc; }
+    
+    /* Responsive adjustments */
+    @media (max-width: 768px) {
+      .viewer-container { padding: 8px; }
+      .pill { padding: 6px 10px; font-size: 14px; }
+      .ghost { margin-left: 8px; }
+      input { width: 120px !important; }
+    }
   </style>
 </head>
 <body>
 
-<h1 style="margin-bottom:8px;">Protein 3D Structure Viewer</h1>
+<div class="viewer-container">
+  <h1>Protein 3D Structure Viewer</h1>
 
-<div class="row">
-  <strong>Gene / UniProt:</strong>
-  <input id="uniprotID" value="BRCA1" style="width:200px;">
-  <button id="loadBtn" class="pill">Load structure</button>
-  <span class="hint">Examples: BRCA1, P38398, P04637…</span>
-</div>
-
-<div id="viewport"></div>
-
-<div class="row">
-  <strong>Mode:</strong>
-  <button id="mSStruc"  class="pill active">Secondary structure</button>
-  <button id="mRainbow" class="pill">Rainbow</button>
-  <button id="mHeat"    class="pill">Variants heatmap</button>
-  <button id="mDomains" class="pill">Domains track</button>
-
-  <span class="ghost"></span><strong>Style:</strong>
-  <button id="sCartoon" class="pill active">Cartoon</button>
-  <button id="sStick"   class="pill">Stick</button>
-  <button id="sSphere"  class="pill">Sphere</button>
-
-  <span class="ghost"></span>
-  <button id="btnSpin" class="pill">Spin</button>
-
-  <span class="ghost"></span><strong>rsID:</strong>
-  <input id="rsInput" placeholder="rs123456" style="width:120px;">
-  <button id="rsBtn" class="pill">Highlight</button>
-
-  <span class="ghost"></span>
-  <span class="hint" id="srcHint"></span>
-</div>
-
-<!-- Heatmap controls + legend + 2D stacked track -->
-<div id="heatmapPanel">
   <div class="row">
-    <strong>Heatmap:</strong>
-    <select id="trackSel">
-      <option value="any">All variants (density)</option>
-      <option value="pathogenic">Pathogenic</option>
-      <option value="benign">Benign</option>
-      <option value="uncertain">Uncertain</option>
-      <option value="predicted">Predicted</option>
-    </select>
-    <strong>Window:</strong>
-    <input id="winSize" type="number" min="1" max="201" step="2" value="15" style="width:70px;">
-    <button id="applyTrack" class="pill">Apply heatmap</button>
+    <strong>Gene / UniProt:</strong>
+    <input id="uniprotID" value="BRCA1" style="width:200px;">
+    <button id="loadBtn" class="pill">Load structure</button>
+    <span class="hint">Examples: BRCA1, P38398, P04637…</span>
   </div>
 
-  <div id="legendBar"></div>
-  <div id="legendScale">
-    <span>Low <span id="legendMin">0</span></span>
-    <span>Medium</span>
-    <span>High <span id="legendMax">1</span></span>
+  <div id="viewport"></div>
+
+  <div class="row">
+    <strong>Mode:</strong>
+    <button id="mSStruc"  class="pill active">Secondary structure</button>
+    <button id="mRainbow" class="pill">Rainbow</button>
+    <button id="mHeat"    class="pill">Variants heatmap</button>
+    <button id="mDomains" class="pill">Domains track</button>
+
+    <span class="ghost"></span><strong>Style:</strong>
+    <button id="sCartoon" class="pill active">Cartoon</button>
+    <button id="sStick"   class="pill">Stick</button>
+    <button id="sSphere"  class="pill">Sphere</button>
+
+    <span class="ghost"></span>
+    <button id="btnSpin" class="pill">Spin</button>
+
+    <span class="ghost"></span><strong>rsID:</strong>
+    <input id="rsInput" placeholder="rs123456" style="width:120px;">
+    <button id="rsBtn" class="pill">Highlight</button>
+
+    <span class="ghost"></span>
+    <span class="hint" id="srcHint"></span>
   </div>
 
-  <canvas id="varTrack"></canvas>
-  <canvas id="varTrack" width="960" height="120" style="margin-top:8px;"></canvas>
-</div>
+  <!-- Heatmap controls + legend + 2D stacked track -->
+  <div id="heatmapPanel">
+    <div class="row">
+      <strong>Heatmap:</strong>
+      <select id="trackSel">
+        <option value="any">All variants (density)</option>
+        <option value="pathogenic">Pathogenic</option>
+        <option value="benign">Benign</option>
+        <option value="uncertain">Uncertain</option>
+        <option value="predicted">Predicted</option>
+      </select>
+      <strong>Window:</strong>
+      <input id="winSize" type="number" min="1" max="201" step="2" value="15" style="width:70px;">
+      <button id="applyTrack" class="pill">Apply heatmap</button>
+    </div>
 
-<!-- 2D domain track -->
-<div id="domainPanel" class="row" style="flex-direction:column; align-items:flex-start;">
-  <canvas id="domainTrack" width="960" height="140"></canvas>
-  <span class="hint">Hover a domain to preview; click a bar to lock/unlock and zoom that region.</span>
+    <div id="legendBar"></div>
+    <div id="legendScale">
+      <span>Low <span id="legendMin">0</span></span>
+      <span>Medium</span>
+      <span>High <span id="legendMax">1</span></span>
+    </div>
+
+    <canvas id="varTrack" width="960" height="120" style="margin-top:8px;"></canvas>
+  </div>
+
+  <!-- 2D domain track -->
+  <div id="domainPanel" class="row" style="flex-direction:column; align-items:flex-start;">
+    <canvas id="domainTrack" width="960" height="140"></canvas>
+    <span class="hint">Hover a domain to preview; click a bar to lock/unlock and zoom that region.</span>
+  </div>
 </div>
 
 <!-- Secondary-structure legend -->
@@ -129,13 +190,12 @@
       : `http://${location.hostname}:5001`;
 
   let comp = null;
-  let mode = "sstruc";   // sstruc | rainbow | heat | domains
-  let style = "cartoon"; // cartoon | stick | sphere
+  let mode = "sstruc";
+  let style = "cartoon";
   let currentSchemeId = null;
   let lastTracks = null, lastDomains = null;
   let lockedDomain = null;
 
-  // rsID highlight
   let highlightPos = null;
   let highlightRep = null;
 
@@ -147,6 +207,22 @@
     uncertain:  "#fee08b",
     predicted:  "#91bfdb"
   };
+
+  // Responsive canvas sizing
+  function resizeCanvases() {
+    const maxWidth = Math.min(960, window.innerWidth - 32);
+    ['varTrack', 'domainTrack'].forEach(id => {
+      const canvas = document.getElementById(id);
+      if (canvas) {
+        canvas.width = maxWidth;
+        // Redraw after resize
+        if (id === 'varTrack' && lastTracks) drawVariantTrack();
+        if (id === 'domainTrack' && lastDomains) drawDomainTrack();
+      }
+    });
+  }
+  
+  window.addEventListener('resize', resizeCanvases);
 
   // ---------- helpers ----------
   function setActive(el, on){ el.classList.toggle("active", !!on); }
@@ -169,7 +245,7 @@
     clearReps();
     if (mode === "rainbow") addStyleRep("residueindex");
     else addStyleRep("sstruc");
-    applyHighlight3D(); // keep rs highlight
+    applyHighlight3D();
   }
 
   function applyDomainBase(){
@@ -215,6 +291,7 @@
         : `Variants: UniProt fallback (n=${lastTracks?.total_variants ?? "?"})`;
     return lastTracks;
   }
+  
   async function fetchDomains(uid){
     const r = await fetch(`${API_BASE}/api/domains/${uid}`);
     if (!r.ok) throw new Error(`domains ${r.status}`);
@@ -222,11 +299,11 @@
     return lastDomains;
   }
 
-  // resolve: Gene symbol → UniProt accession (if needed)
   function looksLikeUniProt(x){
     const s = (x||"").trim();
     return /^[OPQ][0-9][A-Z0-9]{3}[0-9](-\d+)?$/i.test(s) || /^[A-NR-Z][0-9]{5}(-\d+)?$/i.test(s);
   }
+  
   async function resolveIfNeeded(input){
     if (looksLikeUniProt(input)) return input;
     const r = await fetch(`${API_BASE}/api/resolve/${encodeURIComponent(input)}?organism=9606`);
@@ -287,7 +364,6 @@
     ctx.textBaseline = "middle";
     ctx.fillStyle = "#333";
 
-    // Y axis
     ctx.strokeStyle = "#aaa";
     ctx.beginPath(); ctx.moveTo(pad.l-0.5, pad.t); ctx.lineTo(pad.l-0.5, pad.t + plotH); ctx.stroke();
     const ticks = 4;
@@ -299,7 +375,6 @@
       ctx.fillText(String(val), pad.l - 8 - tw, y);
     }
 
-    // bars
     lastTracks.bins.forEach((b,i)=>{
       const x0 = pad.l + i * (plotW / n);
       let y = pad.t + plotH;
@@ -313,7 +388,6 @@
       canvas._barIndex.push({x:x0, y:pad.t, w:barW, h:plotH, start:b.start, end:b.end, totals:b.totals});
     });
 
-    // rsID marker (black)
     if (highlightPos && lastTracks?.length){
       const L = lastTracks.length;
       const xPos = pad.l + Math.round((highlightPos-1)/L * plotW);
@@ -322,7 +396,6 @@
       ctx.restore();
     }
 
-    // tooltip
     canvas.onmousemove = (ev)=>{
       const r = canvas.getBoundingClientRect();
       const mx = ev.clientX - r.left, my = ev.clientY - r.top;
@@ -335,6 +408,7 @@
         `predicted: ${hit.totals.predicted|0}`
       ) : "";
     };
+    
     canvas.onclick = (ev)=>{
       if (!comp) return;
       const r = canvas.getBoundingClientRect();
@@ -343,7 +417,6 @@
       if (hit) comp.autoView(`${hit.start}-${hit.end}`);
     };
 
-    // mini legend
     const yLeg = H - 10; let xLeg = pad.l;
     ["pathogenic","benign","uncertain","predicted"].forEach(k=>{
       ctx.fillStyle = CLASS_COLORS[k]; ctx.fillRect(xLeg, yLeg-8, 10, 10);
@@ -374,7 +447,6 @@
       return pal[i % pal.length];
     }
 
-    // domains
     lastDomains.domains.forEach((d,i)=>{
       const x1 = pad.l + Math.round((d.start-1)/L * plotW);
       const x2 = pad.l + Math.round((d.end)/L * plotW);
@@ -391,7 +463,6 @@
         label:`${d.type||"Domain"}: ${d.description||""} (${d.start}-${d.end})`, color});
     });
 
-    // rsID marker (black)
     if (highlightPos && lastDomains?.domains?.length){
       const xPos = pad.l + Math.round((highlightPos-1)/L * plotW);
       ctx.save(); ctx.strokeStyle = "#000"; ctx.lineWidth = 2;
@@ -399,7 +470,6 @@
       ctx.restore();
     }
 
-    // hover/lock
     let hoverRep = null;
     canvas.onmousemove = (ev)=>{
       const r = canvas.getBoundingClientRect();
@@ -410,10 +480,12 @@
       if (hoverRep) { hoverRep.dispose(); hoverRep = null; }
       if (hit) hoverRep = comp.addRepresentation("cartoon", { sele: hit.sele, color: hit.color, opacity:0.95, scale:0.8 });
     };
+    
     canvas.onmouseleave = ()=>{
       canvas.title = "";
       if (!lockedDomain && hoverRep){ hoverRep.dispose(); hoverRep = null; }
     };
+    
     canvas.onclick = (event)=>{
       if (!comp) return;
       if (lockedDomain){ lockedDomain = null; if (hoverRep){ hoverRep.dispose(); hoverRep=null; } }
@@ -426,7 +498,6 @@
     };
   }
 
-  // 3D rsID highlight
   function applyHighlight3D(){
     if (!comp || !highlightPos) return;
     try { if (highlightRep) highlightRep.dispose(); } catch(e){}
@@ -448,7 +519,7 @@
 
     applyHighlight3D();
     if (comp) comp.autoView(`${highlightPos}-${highlightPos}`);
-    drawVariantTrack(); // redraw 2D with marker
+    drawVariantTrack();
     drawDomainTrack();
   }
 
@@ -471,6 +542,7 @@
     show(document.getElementById("domainPanel"), mode === "domains");
     show(document.getElementById("ssPopover"),  mode === "sstruc");
   }
+  
   function applyStyleButtons(){
     Object.entries(btnsStyle).forEach(([k,el]) => setActive(el, k===style));
   }
@@ -505,7 +577,7 @@
     const raw = document.getElementById("uniprotID").value.trim();
     if (!raw) return alert("Enter Gene symbol or UniProt ID");
     const id = await resolveIfNeeded(raw);
-    document.getElementById("uniprotID").value = id; // show resolved accession
+    document.getElementById("uniprotID").value = id;
 
     lockedDomain = null; lastTracks = null; lastDomains = null; highlightPos = null;
     try { if (highlightRep) highlightRep.dispose(); } catch(e){}
@@ -522,7 +594,9 @@
   document.getElementById("loadBtn").onclick = () => loadStructure().catch(console.error);
 
   // init
-  applyModeButtons(); applyStyleButtons();
+  applyModeButtons(); 
+  applyStyleButtons();
+  resizeCanvases();
   loadStructure().catch(console.error);
 </script>
 </body>
