@@ -380,8 +380,8 @@ If you have any difficulty using VarViz3D, feel free to open an [issue](https://
 - Discussions: [GitHub Discussions](https://github.com/your-team/varviz3d/discussions)
 - Emails of contributors: 
 
-| Name and Surname | email | Role |
-|------------------|----------------------|------------------------------------------------|
+| Name and Surname | Email | Role in the project |
+|------------------|-------|---------------------|
 | Yuliya Barablina |  | 2D genomic visualization, variant annotation, risk scores fetching |
 | Daria Panchenko |  | 3D protein structure visualization, variant mapping and domain annotation |
 | Omad Saidov |  | Front-, backend deployment |
